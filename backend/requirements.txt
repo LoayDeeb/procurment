@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+openai
+python-dotenv
+sqlalchemy
+pydantic
+weasyprint
+python-multipart
+fpdf2
+PyPDF2
+markdown
+jinja2
+markdown-it-py
+pdfplumber
+pdf2image
+pytesseract

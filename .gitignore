@@ -1,0 +1,34 @@
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Python / backend
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/temp_proposal.pdf
+backend/generated_pdfs/
+backend/proposals/
+backend/openapi_8001.json
+backend/tts_test.mp3
+
+# Environment / secrets
+.env
+.env.local
+.env.*
+backend/.env
+backend/.env.*
+
+# Logs
+*.log
+backend/*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local DB/runtime files
+*.db
+backend/test.db

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>Request for Proposal (RFP)</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Almarai:wght@400;700&family=Georama:wght@400;600;700&display=swap');
+    :root {
+      --gig-blue: #19058c;
+      --gig-gold: #a57735;
+      --gig-dark: #343434;
+      --gig-gray-4: #f3f4f8;
+      --gig-gray-5: #eef1f5;
+      --gig-border: #e8e8e8;
+      --gig-white: #fff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Almarai', 'Georama', Arial, sans-serif;
+      font-size: 11.5pt;
+      line-height: 1.65;
+      color: var(--gig-dark);
+      margin: 1.8cm;
+      background: var(--gig-white);
+      direction: rtl;
+    }
+    .header {
+      border-bottom: 3px solid var(--gig-blue);
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+    }
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .logo {
+      width: 120px;
+      height: auto;
+    }
+    .header-title {
+      text-align: right;
+    }
+    .header-title h1 {
+      margin: 0;
+      font-size: 24pt;
+      color: var(--gig-blue);
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .header-title p {
+      margin: 6px 0 0 0;
+      color: var(--gig-gold);
+      font-size: 11pt;
+      font-weight: 600;
+    }
+    h2 {
+      color: var(--gig-blue);
+      font-size: 16pt;
+      margin: 1.2em 0 0.5em;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--gig-blue);
+    }
+    h3 {
+      color: var(--gig-gold);
+      font-size: 13pt;
+      margin: 1em 0 0.4em;
+    }
+    p {
+      margin: 0 0 0.8em;
+      text-align: justify;
+    }
+    ul, ol {
+      margin: 0.6em 0 0.8em 1.2em;
+      padding-inline-start: 1.1em;
+    }
+    li { margin-bottom: 0.35em; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 0.8em 0 1em;
+    }
+    th, td {
+      border: 1px solid var(--gig-border);
+      padding: 8px 10px;
+      text-align: right;
+    }
+    th {
+      background: var(--gig-gray-5);
+      color: var(--gig-blue);
+      font-weight: 700;
+    }
+    .callout {
+      background: var(--gig-gray-5);
+      border-right: 4px solid var(--gig-gold);
+      padding: 10px 12px;
+      margin: 0.9em 0;
+      border-radius: 6px;
+    }
+    .footer-note {
+      margin-top: 20px;
+      padding-top: 10px;
+      border-top: 1px solid var(--gig-border);
+      color: #666;
+      font-size: 9.5pt;
+      text-align: center;
+    }
+    @page {
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        color: #666;
+        font-size: 9pt;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <img src="gig_official_logo.png" alt="GIG Jordan" class="logo" />
+      <div class="header-title">
+        <h1>طلب تقديم عروض (RFP)</h1>
+        <p>GIG Jordan - Enterprise Procurement & Insurance Solutions</p>
+      </div>
+    </div>
+  </header>
+
+  {{ content|safe }}
+
+  <div class="footer-note">
+    Generated for GIG Jordan internal procurement workflow.
+  </div>
+</body>
+</html>
