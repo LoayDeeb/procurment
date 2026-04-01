@@ -17,9 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import SessionLocal, init_db
-from models import Proposal as ProposalModel
-from models import RFP as RFPModel
+try:
+    from .database import SessionLocal, init_db
+    from .models import Proposal as ProposalModel
+    from .models import RFP as RFPModel
+except ImportError:
+    from database import SessionLocal, init_db
+    from models import Proposal as ProposalModel
+    from models import RFP as RFPModel
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
