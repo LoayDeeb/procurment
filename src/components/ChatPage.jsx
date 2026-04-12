@@ -14,6 +14,23 @@ const QUICK_PROMPTS = [
   'نريد RFP لمركز خدمة عملاء رقمي متعدد القنوات خلال 6 اشهر.',
 ];
 
+function workflowStatusLabel(status) {
+  switch (status) {
+    case 'drafting':
+      return 'Drafting';
+    case 'awaiting_stakeholders':
+      return 'Awaiting Stakeholders';
+    case 'all_replies_received':
+      return 'All Replies Received';
+    case 'final_rfp_generated':
+      return 'Final RFP Ready';
+    case 'delivered':
+      return 'Delivered';
+    default:
+      return status || '-';
+  }
+}
+
 function isArabicText(text) {
   return /[\u0600-\u06FF]/.test(text || '');
 }
@@ -38,6 +55,9 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
   ]);
   const [input, setInput] = useState('');
   const [pdfUrl, setPdfUrl] = useState(null);
+  const [workflowData, setWorkflowData] = useState(null);
+  const [sentEmails, setSentEmails] = useState([]);
+  const [workflowFormError, setWorkflowFormError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [apiHealthy, setApiHealthy] = useState(true);
@@ -112,6 +132,35 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
     };
     checkHealth();
   }, []);
+
+  useEffect(() => {
+    if (!workflowData?.id) return undefined;
+    const shouldPoll = !['delivered', 'final_rfp_generated'].includes(workflowData.workflow_status);
+    if (!shouldPoll) return undefined;
+
+    const poll = async () => {
+      try {
+        const res = await apiClient.get(`/workflow/rfp-requests/${workflowData.id}`);
+        setWorkflowData(res.data);
+      } catch {
+        // best-effort polling only
+      }
+    };
+
+    const intervalId = window.setInterval(poll, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [workflowData?.id, workflowData?.workflow_status]);
+
+  const refreshWorkflow = async () => {
+    if (!workflowData?.id) return;
+    try {
+      const res = await apiClient.post(`/workflow/rfp-requests/${workflowData.id}/refresh`);
+      setWorkflowData(res.data);
+      setWorkflowFormError('');
+    } catch (err) {
+      setWorkflowFormError(formatApiError(err, 'Unable to refresh workflow status.'));
+    }
+  };
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -309,6 +358,11 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
 
       const data = await res.json();
       if (data.pdf_url) setPdfUrl(data.pdf_url);
+      if (data.workflow) {
+        setWorkflowData(data.workflow);
+        setSentEmails(data.sent_emails || []);
+        setWorkflowFormError('');
+      }
       await streamAssistantReply(data.reply || '');
       setApiHealthy(true);
     } catch (err) {
@@ -431,6 +485,79 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
                 {prompt}
               </button>
             ))}
+          </div>
+
+          <div className="mt-4 space-y-3 rounded-xl border border-[#dce4f7] bg-[#f9fbff] p-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[#60709c]">Auto Stakeholder Outreach</p>
+              <p className="mt-2 text-[11px] text-[#5f6b85]">
+                The requester identity and stakeholder emails are now loaded from backend configuration. The agent will use those static contacts automatically when it is ready to send outreach.
+              </p>
+            </div>
+
+            {workflowFormError ? (
+              <p className="text-[11px] text-[#c7372f]">{workflowFormError}</p>
+            ) : null}
+
+            {workflowData ? (
+              <div className="rounded-lg border border-[#d7e2fb] bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold text-[#273E91]">Workflow #{workflowData.id}</p>
+                    <p className="text-[11px] text-[#5f6b85]">{workflowStatusLabel(workflowData.workflow_status)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={refreshWorkflow}
+                    className="rounded-lg border border-[#d6dbea] px-2 py-1 text-[11px] font-semibold text-[#273E91]"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                <div className="mt-2 space-y-2">
+                  {workflowData.stakeholders?.map((stakeholder) => (
+                    <div key={stakeholder.id} className="rounded-lg bg-[#f6f8fd] px-2 py-2 text-[11px] text-[#33426f]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">{stakeholder.role}</span>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-[#273E91]">
+                          {stakeholder.status}
+                        </span>
+                      </div>
+                      <p>{stakeholder.name}</p>
+                      <p className="truncate">{stakeholder.email}</p>
+                    </div>
+                  ))}
+                </div>
+                {sentEmails.length ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#60709c]">Agent Sent</p>
+                    {sentEmails.map((emailItem) => (
+                      <div key={`${emailItem.role}-${emailItem.email}`} className="rounded-lg border border-[#edf0f8] bg-[#fbfcff] p-2 text-[11px] text-[#33426f]">
+                        <p className="font-semibold text-[#273E91]">
+                          {emailItem.role} - {emailItem.name}
+                        </p>
+                        <p className="mt-1"><span className="font-semibold">To:</span> {emailItem.email}</p>
+                        <p className="mt-1"><span className="font-semibold">Subject:</span> {emailItem.subject}</p>
+                        <p className="mt-1 whitespace-pre-wrap"><span className="font-semibold">Body:</span> {emailItem.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {workflowData.final_pdf_url ? (
+                  <a
+                    href={`${API_BASE}${workflowData.final_pdf_url}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-flex rounded-lg border border-[#b8c9f0] bg-[#f3f7ff] px-3 py-2 text-[11px] font-semibold text-[#22367f]"
+                  >
+                    Open Final RFP PDF
+                  </a>
+                ) : null}
+                {workflowData.last_error ? (
+                  <p className="mt-2 text-[11px] text-[#c7372f]">{workflowData.last_error}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 space-y-2">

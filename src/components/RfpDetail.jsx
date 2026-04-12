@@ -11,6 +11,7 @@ function scoreLabel(value) {
 export default function RfpDetail() {
   const [tab, setTab] = useState('overview');
   const [rfps, setRfps] = useState([]);
+  const [workflows, setWorkflows] = useState([]);
   const [selectedRfpId, setSelectedRfpId] = useState(null);
   const [proposals, setProposals] = useState([]);
   const [loadingRfps, setLoadingRfps] = useState(true);
@@ -35,8 +36,10 @@ export default function RfpDetail() {
     try {
       setError('');
       const res = await apiClient.get('/rfps');
+      const workflowRes = await apiClient.get('/workflow/rfp-requests');
       const items = res.data || [];
       setRfps(items);
+      setWorkflows(workflowRes.data || []);
       if (items.length) {
         setSelectedRfpId((prev) => prev ?? items[0].id);
       } else {
@@ -45,6 +48,7 @@ export default function RfpDetail() {
     } catch (err) {
       setError(`Unable to load RFP workspace. ${formatApiError(err, `Verify backend is running at ${API_BASE}.`)}`);
       setRfps([]);
+      setWorkflows([]);
       setSelectedRfpId(null);
     } finally {
       setLoadingRfps(false);
@@ -202,6 +206,37 @@ export default function RfpDetail() {
                     </a>
                   ) : (
                     <p className="text-sm text-[#7a8399]">No RFP source file available for this record.</p>
+                  )}
+                </div>
+
+                <div className="mt-5 rounded-lg border border-[#edf0f8] p-4">
+                  <p className="text-sm font-semibold text-[#273E91]">Stakeholder Workflows</p>
+                  {workflows.length === 0 ? (
+                    <p className="mt-2 text-sm text-[#7a8399]">No stakeholder-driven RFP workflows yet.</p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {workflows.slice(0, 5).map((workflow) => (
+                        <div key={workflow.id} className="rounded-lg border border-[#edf0f8] px-3 py-2 text-sm">
+                          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                            <span className="font-semibold text-[#273E91]">{workflow.title}</span>
+                            <span className="text-[#5f6b85]">{workflow.workflow_status}</span>
+                          </div>
+                          <p className="mt-1 text-[#5f6b85]">
+                            {workflow.requester_name}  -  {workflow.requester_email}
+                          </p>
+                          {workflow.final_pdf_url ? (
+                            <a
+                              href={`${API_BASE}${workflow.final_pdf_url}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex rounded-lg border border-[#d4daeb] px-3 py-1.5 text-xs font-semibold text-[#273E91] hover:bg-[#f2f5fb]"
+                            >
+                              Open Final Workflow PDF
+                            </a>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>

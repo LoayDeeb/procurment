@@ -4,6 +4,7 @@ openai
 python-dotenv
 sqlalchemy
 pydantic
+email-validator
 weasyprint
 python-multipart
 fpdf2
