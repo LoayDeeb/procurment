@@ -377,6 +377,15 @@ def _ensure_email_configured():
         )
 
 
+def _workflow_mode_enabled() -> bool:
+    return bool(
+        DEFAULT_REQUESTER_EMAIL
+        and SYSTEM_STAKEHOLDERS
+        and GMAIL_ADDRESS
+        and GMAIL_APP_PASSWORD
+    )
+
+
 def _messages_to_transcript(messages: List[Dict[str, str]]) -> str:
     lines = []
     for message in messages:
@@ -973,25 +982,30 @@ def generate_elevenlabs_audio(text: str) -> bytes:
 @app.post("/chat/rfp")
 def chat_rfp(req: ChatRequest):
     _ensure_openai_configured()
-    tools = [
-        {
+    workflow_mode = _workflow_mode_enabled()
+    tools: List[Dict[str, Any]] = []
+    if not workflow_mode:
+        tools.append(
+            {
+                "type": "function",
+                "name": "generate_pdf",
+                "description": "Generate a PDF from provided RFP requirements. Generate the RFP text and all content in Arabic.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "RFP requirements text"},
+                    },
+                    "required": ["text"],
+                },
+            }
+        )
+    if workflow_mode:
+        tools.append({
             "type": "function",
-            "name": "generate_pdf",
-            "description": "Generate a PDF from provided RFP requirements. Generate the RFP text and all content in Arabic.",
+            "name": "start_stakeholder_workflow",
+            "description": "Send stakeholder requirement emails using the fixed stakeholder directory configured for this procurement assistant. You must write a tailored subject and body for each stakeholder.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "RFP requirements text"},
-                },
-                "required": ["text"],
-            },
-        },
-        {
-            "type": "function",
-                    "name": "start_stakeholder_workflow",
-                    "description": "Send stakeholder requirement emails using the fixed stakeholder directory configured for this procurement assistant. You must write a tailored subject and body for each stakeholder.",
-                    "parameters": {
-                        "type": "object",
                         "properties": {
                     "requester_name": {"type": "string", "description": "Name of the requesting user. Use the configured default requester if no override is needed."},
                     "requester_email": {"type": "string", "description": "Email of the requesting user. Use the configured default requester email if no override is needed."},
@@ -1012,8 +1026,7 @@ def chat_rfp(req: ChatRequest):
                 },
                 "required": ["title", "stakeholder_emails"],
             },
-        },
-    ]
+        })
 
     system_prompt = (
         "You are GIG Jordan's senior procurement copilot for enterprise insurance projects.\n\n"
@@ -1026,17 +1039,26 @@ def chat_rfp(req: ChatRequest):
         "- Produce a professional, board-ready RFP when enough information is available.\n"
         "- Include practical enterprise insurance requirements for claims, underwriting, policy administration, CRM/contact center, integrations, and reporting.\n"
         "- Never output numeric digits in chat replies; write numbers in Arabic words.\n"
-        "\nStakeholder outreach behavior:\n"
-        f"- Fixed requester identity:\n- {_default_requester_prompt_block()}\n"
-        f"- Fixed stakeholder directory:\n{_system_stakeholders_prompt_block()}\n"
-        "- The requester identity and stakeholder emails are already known to you from configuration unless the user explicitly gives replacements.\n"
-        "- Do not ask the user to enter requester or stakeholder emails manually for the standard workflow.\n"
-        "- After you have enough project requirements and you know the requester name and email, call start_stakeholder_workflow.\n"
-        "- When you call start_stakeholder_workflow, you must write the actual subject and body for each stakeholder yourself.\n"
-        "- Personalize each stakeholder email based on their role, what you still need from them, the project context, and the decisions they own.\n"
-        "- After calling start_stakeholder_workflow, tell the user clearly that you sent stakeholder emails and that you will wait for their replies before drafting the final RFP.\n"
-        "- If the user does not specify requester identity, use the configured default requester.\n"
     )
+    if workflow_mode:
+        system_prompt += (
+            "\nStakeholder outreach behavior:\n"
+            f"- Fixed requester identity:\n- {_default_requester_prompt_block()}\n"
+            f"- Fixed stakeholder directory:\n{_system_stakeholders_prompt_block()}\n"
+            "- The requester identity and stakeholder emails are already known to you from configuration unless the user explicitly gives replacements.\n"
+            "- Do not ask the user to enter requester or stakeholder emails manually for the standard workflow.\n"
+            "- Once you have enough project requirements, you must call start_stakeholder_workflow before any final RFP is produced.\n"
+            "- In workflow mode, do not draft or generate a final PDF directly in chat.\n"
+            "- When you call start_stakeholder_workflow, you must write the actual subject and body for each stakeholder yourself.\n"
+            "- Personalize each stakeholder email based on their role, what you still need from them, the project context, and the decisions they own.\n"
+            "- After calling start_stakeholder_workflow, tell the user clearly that you sent stakeholder emails and that you will wait for their replies before drafting the final RFP.\n"
+            "- If the user does not specify requester identity, use the configured default requester.\n"
+        )
+    else:
+        system_prompt += (
+            "\nDirect draft behavior:\n"
+            "- If the user wants an immediate draft and workflow mode is not configured, you may generate the RFP PDF directly.\n"
+        )
     input_msgs: List[Dict[str, Any]] = [
         {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}
     ]
