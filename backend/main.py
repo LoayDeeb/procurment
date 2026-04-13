@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import smtplib
@@ -130,6 +131,9 @@ PROPOSALS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/pdfs", StaticFiles(directory=str(PDF_DIR)), name="pdfs")
 
 _workflow_thread_started = False
+logger = logging.getLogger("procurement_backend")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
 def now_iso() -> str:
@@ -148,6 +152,14 @@ def get_db():
 def on_startup():
     global _workflow_thread_started
     init_db()
+    logger.info(
+        "startup config workflow_ready=%s requester_email=%s stakeholder_count=%s gmail_configured=%s public_backend_url=%s",
+        _workflow_mode_enabled(),
+        bool(DEFAULT_REQUESTER_EMAIL),
+        len(SYSTEM_STAKEHOLDERS),
+        bool(GMAIL_ADDRESS and GMAIL_APP_PASSWORD),
+        PUBLIC_BACKEND_URL,
+    )
     if not _workflow_thread_started:
         thread = threading.Thread(target=_workflow_poll_loop, daemon=True, name="workflow-email-poller")
         thread.start()
@@ -891,10 +903,12 @@ def _workflow_poll_loop():
     while True:
         db = SessionLocal()
         try:
-            _poll_gmail_replies(db)
-            _finalize_ready_workflows(db)
+            processed = _poll_gmail_replies(db)
+            finalized = _finalize_ready_workflows(db)
+            if processed or finalized:
+                logger.info("workflow poll processed_replies=%s finalized_workflows=%s", processed, finalized)
         except Exception as exc:
-            print(f"[workflow-email-poller] {exc}")
+            logger.exception("workflow-email-poller failed: %s", exc)
         finally:
             db.close()
         time.sleep(EMAIL_POLL_SECONDS)
@@ -1027,6 +1041,14 @@ def chat_rfp(req: ChatRequest):
                 "required": ["title", "stakeholder_emails"],
             },
         })
+    logger.info(
+        "chat_rfp request workflow_mode=%s tools=%s requester_default=%s stakeholder_count=%s message_count=%s",
+        workflow_mode,
+        [tool["name"] for tool in tools],
+        DEFAULT_REQUESTER_EMAIL or "",
+        len(SYSTEM_STAKEHOLDERS),
+        len(req.messages),
+    )
 
     system_prompt = (
         "You are GIG Jordan's senior procurement copilot for enterprise insurance projects.\n\n"
@@ -1047,8 +1069,9 @@ def chat_rfp(req: ChatRequest):
             f"- Fixed stakeholder directory:\n{_system_stakeholders_prompt_block()}\n"
             "- The requester identity and stakeholder emails are already known to you from configuration unless the user explicitly gives replacements.\n"
             "- Do not ask the user to enter requester or stakeholder emails manually for the standard workflow.\n"
-            "- Once you have enough project requirements, you must call start_stakeholder_workflow before any final RFP is produced.\n"
-            "- In workflow mode, do not draft or generate a final PDF directly in chat.\n"
+            "- Once you have enough project requirements, your NEXT action must be start_stakeholder_workflow.\n"
+            "- In workflow mode, you are forbidden from producing a final RFP or final PDF directly in chat.\n"
+            "- Do not present a completed RFP draft to the user before stakeholder outreach is sent and replies are collected.\n"
             "- When you call start_stakeholder_workflow, you must write the actual subject and body for each stakeholder yourself.\n"
             "- Personalize each stakeholder email based on their role, what you still need from them, the project context, and the decisions they own.\n"
             "- After calling start_stakeholder_workflow, tell the user clearly that you sent stakeholder emails and that you will wait for their replies before drafting the final RFP.\n"
@@ -1066,9 +1089,14 @@ def chat_rfp(req: ChatRequest):
         input_msgs.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
     response = openai.responses.create(model="gpt-4.1", input=input_msgs, tools=tools)
+    logger.info(
+        "chat_rfp model_response output_types=%s",
+        [getattr(output, "type", None) for output in getattr(response, "output", [])],
+    )
 
     for output in response.output:
         if getattr(output, "type", None) in ("function_call", "tool_call") and getattr(output, "name", "") == "generate_pdf":
+            logger.warning("chat_rfp generate_pdf tool selected workflow_mode=%s", workflow_mode)
             arguments = getattr(output, "arguments", {})
             if isinstance(arguments, str):
                 try:
@@ -1081,6 +1109,7 @@ def chat_rfp(req: ChatRequest):
                 pdf_url = f"/download/{pdf_filename}"
                 return {"reply": "تم تجهيز ملف طلب العروض بصيغة PDF وهو جاهز للتنزيل.", "pdf_url": pdf_url}
         elif getattr(output, "type", None) in ("function_call", "tool_call") and getattr(output, "name", "") == "start_stakeholder_workflow":
+            logger.info("chat_rfp start_stakeholder_workflow tool selected")
             arguments = getattr(output, "arguments", {})
             if isinstance(arguments, str):
                 try:
@@ -1091,6 +1120,13 @@ def chat_rfp(req: ChatRequest):
             requester_email = str(arguments.get("requester_email") or DEFAULT_REQUESTER_EMAIL).strip() if isinstance(arguments, dict) else DEFAULT_REQUESTER_EMAIL
             title = str(arguments.get("title") or "Stakeholder RFP Request").strip() if isinstance(arguments, dict) else "Stakeholder RFP Request"
             stakeholder_emails = arguments.get("stakeholder_emails") if isinstance(arguments, dict) else []
+            logger.info(
+                "chat_rfp workflow_args requester_name=%s requester_email_present=%s title=%s drafted_email_count=%s",
+                requester_name,
+                bool(requester_email),
+                title,
+                len(stakeholder_emails) if isinstance(stakeholder_emails, list) else 0,
+            )
             if not requester_name or not requester_email:
                 raise HTTPException(status_code=503, detail="DEFAULT_REQUESTER_NAME and DEFAULT_REQUESTER_EMAIL must be configured.")
             if not SYSTEM_STAKEHOLDERS:
@@ -1110,6 +1146,7 @@ def chat_rfp(req: ChatRequest):
                     .first()
                 )
                 if existing:
+                    logger.info("chat_rfp existing workflow reused workflow_id=%s", existing.id)
                     return {
                         "reply": replace_numbers_with_arabic_words(
                             "أنا بالفعل باعث رسائل جمع المتطلبات للجهات المعنية على نفس الطلب، وهلأ عم بتابع الردود لحتى أرجعلك بالنسخة النهائية."
@@ -1125,6 +1162,7 @@ def chat_rfp(req: ChatRequest):
                     stakeholders=SYSTEM_STAKEHOLDERS,
                 )
                 _send_stakeholder_requests(db, workflow, custom_emails=stakeholder_emails if isinstance(stakeholder_emails, list) else None)
+                logger.info("chat_rfp stakeholder workflow started workflow_id=%s", workflow.id)
                 sent_emails = []
                 email_lookup = {
                     str(item.get("role") or "").strip().lower(): item
@@ -1157,8 +1195,10 @@ def chat_rfp(req: ChatRequest):
                 if hasattr(content, "type") and content.type == "output_text":
                     msg_text += getattr(content, "text", "")
             if msg_text:
+                logger.info("chat_rfp returned plain message without tool call")
                 return {"reply": replace_numbers_with_arabic_words(msg_text)}
 
+    logger.warning("chat_rfp no valid assistant response returned")
     return {"reply": "ما وصلتني استجابة صالحة من المساعد."}
 
 
