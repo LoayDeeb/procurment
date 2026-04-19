@@ -6,7 +6,7 @@ import { API_BASE } from '../config/api';
 import { apiClient, formatApiError } from '../config/http';
 
 const INITIAL_ASSISTANT_MESSAGE =
-  'اهلا بك في مساعد المشتريات الخاص بشركة GIG الاردن. شاركني نطاق المشروع والمتطلبات الالزامية والجدول الزمني لابدا صياغة مسودة RFP دقيقة.';
+  'اهلا بك في مساعد المشتريات الخاص بالهيئة السعودية للمواصفات والمقاييس والجودة (SASO). شاركني نطاق المشروع والمتطلبات الالزامية والجدول الزمني لابدا صياغة مسودة RFP دقيقة.';
 
 const QUICK_PROMPTS = [
   'نحتاج منصة مطالبات رقمية مع تكامل مع انظمة التأمين الحالية.',
@@ -461,8 +461,8 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
           <div className="mb-4 flex items-center gap-3">
             <img src={Chatavatar} alt="assistant avatar" className="h-11 w-11 rounded-xl object-cover" />
             <div>
-              <h2 className="text-sm font-bold text-[#1f3280]">GIG Procurement Copilot</h2>
-              <p className="text-xs text-[#60709c]">Jordan Insurance RFP Assistant</p>
+              <h2 className="text-sm font-bold text-[#1f3280]">SASO Procurement Copilot</h2>
+              <p className="text-xs text-[#60709c]">Saudi Standards, Metrology and Quality RFP Assistant</p>
             </div>
           </div>
 
@@ -618,7 +618,7 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
           <header className="border-b border-[#e2e9f8] bg-white/80 px-5 py-4">
             <h3 className="text-lg font-bold text-[#22367f]">Live RFP Drafting Workspace</h3>
             <p className="text-xs text-[#60709c]">
-              Conversation is tailored to GIG Insurance projects and can generate a structured draft PDF.
+              Conversation is tailored to SASO procurement projects and can generate a structured draft PDF.
             </p>
           </header>
 

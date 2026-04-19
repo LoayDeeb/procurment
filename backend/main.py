@@ -458,7 +458,7 @@ def _generate_final_rfp_text(workflow: RfpWorkflowRequestModel) -> str:
     stakeholder_context = "\n\n".join(stakeholder_sections)
 
     system_prompt = (
-        "You are GIG Jordan's senior procurement copilot for enterprise insurance projects.\n"
+        "You are SASO's senior procurement copilot for standards, metrology, quality, regulatory, and digital transformation procurements.\n"
         "Produce a formal, board-ready RFP in Arabic. The final output must be the RFP document text only.\n"
         "Use structured headings and include these sections:\n"
         "1) Executive Summary\n"
@@ -466,7 +466,7 @@ def _generate_final_rfp_text(workflow: RfpWorkflowRequestModel) -> str:
         "3) Scope of Work (In Scope / Out of Scope)\n"
         "4) Functional Requirements\n"
         "5) Technical & Integration Requirements\n"
-        "6) Security, Data Privacy, BCM/DR, and Regulatory Compliance (Jordan insurance context)\n"
+        "6) Security, Data Privacy, BCM/DR, and Regulatory Compliance (Saudi public-sector and regulatory context)\n"
         "7) Vendor Qualifications & Mandatory Evidence\n"
         "8) Project Governance, Timeline, Milestones, and Deliverables\n"
         "9) Commercial Model, Pricing Template, and Assumptions\n"
@@ -1051,15 +1051,15 @@ def chat_rfp(req: ChatRequest):
     )
 
     system_prompt = (
-        "You are GIG Jordan's senior procurement copilot for enterprise insurance projects.\n\n"
+        "You are SASO's senior procurement copilot for standards, metrology, quality, regulatory, and digital transformation procurements.\n\n"
         "Conversation behavior:\n"
-        "- Always speak in Jordanian colloquial Arabic only unless the user explicitly asks for another language.\n"
+        "- Always speak in professional Arabic suitable for a Saudi government context unless the user explicitly asks for another language.\n"
         "- Keep chat replies short and conversational.\n"
         "- Ask at most three clarification questions in total.\n"
         "- If enough input is available, move directly to drafting.\n\n"
         "RFP quality bar:\n"
         "- Produce a professional, board-ready RFP when enough information is available.\n"
-        "- Include practical enterprise insurance requirements for claims, underwriting, policy administration, CRM/contact center, integrations, and reporting.\n"
+        "- Include practical requirements for standards, metrology, quality, conformity, technical regulations, laboratories, certification, digital services, integrations, cybersecurity, and reporting where relevant.\n"
         "- Never output numeric digits in chat replies; write numbers in Arabic words.\n"
     )
     if workflow_mode:

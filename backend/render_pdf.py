@@ -113,9 +113,15 @@ def _generate_pdf_with_fpdf(md_text: str, template_path: str, output_path: str):
         return
 
     base_dir = os.path.dirname(template_path) or "."
-    gig_logo = os.path.join(base_dir, "gig_logo.png")
-    if not os.path.exists(gig_logo):
-        gig_logo = os.path.join(base_dir, "Logochi.png")
+    org_logo = os.path.join(base_dir, "saso_logo_large.png")
+    if not os.path.exists(org_logo):
+        org_logo = os.path.join(base_dir, "saso_logo.png")
+    if not os.path.exists(org_logo):
+        org_logo = os.path.join(base_dir, "saso_logo.svg")
+    if not os.path.exists(org_logo):
+        org_logo = os.path.join(base_dir, "labiba_logo.png")
+    if not os.path.exists(org_logo):
+        org_logo = os.path.join(base_dir, "Logochi.png")
 
     pdf = FPDF()
     pdf.set_margins(18, 18, 18)
@@ -131,15 +137,15 @@ def _generate_pdf_with_fpdf(md_text: str, template_path: str, output_path: str):
     except Exception:
         pdf.set_font("Helvetica", "B", 16)
 
-    if os.path.exists(gig_logo):
+    if os.path.exists(org_logo):
         try:
             logo_w = 34
             x_logo = pdf.w - pdf.r_margin - logo_w
-            pdf.image(gig_logo, x=x_logo, y=10, w=logo_w)
+            pdf.image(org_logo, x=x_logo, y=10, w=logo_w)
         except Exception:
             pass
 
-    title = "طلب عروض - GIG الأردن"
+    title = "طلب عروض - الهيئة السعودية للمواصفات والمقاييس والجودة (SASO)"
     pdf.set_text_color(0, 102, 179)
     pdf.cell(0, 10, _shape_arabic_for_pdf(title), new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(4)

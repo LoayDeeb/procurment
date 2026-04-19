@@ -127,9 +127,9 @@ def render_markdown_to_pdf(pdf, markdown_text):
     pdf.ln(4)
 
 def build_pdf(sections, output_path='RFP_Evaluation.pdf', title='RFP Evaluation', logo_path=None, brand_rgb=(40,70,150), font_dir='.'): 
-    # Use labiba_logo.png as the default logo if not provided
+    # Prefer the official SASO logo when a caller does not pass a custom asset.
     if logo_path is None:
-        logo_path = 'labiba_logo.png'
+        logo_path = 'saso_logo_large.png'
     pdf = StyledPDF(title=title, logo_path=logo_path, brand_rgb=brand_rgb, font_dir=font_dir)
     pdf.add_page()
     for section in sections:
