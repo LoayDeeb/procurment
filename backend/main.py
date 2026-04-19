@@ -135,6 +135,11 @@ logger = logging.getLogger("procurement_backend")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
+WORKFLOW_SENT_REPLY = (
+    "تمام، أرسلت الآن رسائل جمع المتطلبات للجهات المعنية المعروفة عندي، "
+    "وبمجرد ما يصلني ردهم كلهم سأجهز نسخة RFP النهائية وأرسلها إليك."
+)
+
 
 def now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds")
@@ -1180,10 +1185,10 @@ def chat_rfp(req: ChatRequest):
                             "body": drafted.get("body") or "",
                         }
                     )
+                reply_text = replace_numbers_with_arabic_words(WORKFLOW_SENT_REPLY).strip() or WORKFLOW_SENT_REPLY
+                logger.info("chat_rfp stakeholder workflow reply_length=%s", len(reply_text))
                 return {
-                    "reply": replace_numbers_with_arabic_words(
-                        "تمام، أرسلت الآن رسائل جمع المتطلبات للجهات المعنية المعروفة عندي، وبمجرد ما يوصلني ردهم كلهم رح أجهز نسخة RFP النهائية وأرسلها إلك."
-                    ),
+                    "reply": reply_text,
                     "workflow": _serialize_workflow(workflow),
                     "sent_emails": sent_emails,
                 }

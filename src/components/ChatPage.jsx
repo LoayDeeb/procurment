@@ -14,6 +14,9 @@ const QUICK_PROMPTS = [
   'نريد RFP لمركز خدمة عملاء رقمي متعدد القنوات خلال 6 اشهر.',
 ];
 
+const WORKFLOW_SENT_FALLBACK_REPLY =
+  'تم إرسال رسائل جمع المتطلبات إلى الجهات المعنية، وسأتابع الردود ثم أعود إليك بالنسخة النهائية من طلب تقديم العروض.';
+
 function workflowStatusLabel(status) {
   switch (status) {
     case 'drafting':
@@ -88,6 +91,14 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
     if (e.currentTarget.dataset.fallbackApplied === 'true') return;
     e.currentTarget.dataset.fallbackApplied = 'true';
     e.currentTarget.src = UserAvatar;
+  };
+
+  const normalizeWorkflow = (workflow) => {
+    if (!workflow || typeof workflow !== 'object') return null;
+    return {
+      ...workflow,
+      stakeholders: Array.isArray(workflow.stakeholders) ? workflow.stakeholders : [],
+    };
   };
 
   useEffect(() => {
@@ -359,11 +370,17 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
       const data = await res.json();
       if (data.pdf_url) setPdfUrl(data.pdf_url);
       if (data.workflow) {
-        setWorkflowData(data.workflow);
-        setSentEmails(data.sent_emails || []);
+        setWorkflowData(normalizeWorkflow(data.workflow));
+        setSentEmails(Array.isArray(data.sent_emails) ? data.sent_emails : []);
         setWorkflowFormError('');
       }
-      await streamAssistantReply(data.reply || '');
+      const assistantReply =
+        typeof data.reply === 'string' && data.reply.trim()
+          ? data.reply.trim()
+          : Array.isArray(data.sent_emails) && data.sent_emails.length
+            ? WORKFLOW_SENT_FALLBACK_REPLY
+            : 'تمت معالجة الطلب.';
+      await streamAssistantReply(assistantReply);
       setApiHealthy(true);
     } catch (err) {
       const friendlyError = formatApiError(err, `Unable to connect to ${API_BASE}.`);
@@ -457,7 +474,7 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
       <div className="chat-bg-orb chat-bg-orb-c" />
 
       <div className="relative mx-auto grid h-full max-w-[1400px] gap-4 lg:grid-cols-[320px_1fr]">
-        <aside className="rounded-2xl border border-[#d5def4] bg-white/85 p-4 shadow-[0_12px_28px_rgba(39,62,145,0.09)] backdrop-blur">
+        <aside className="min-h-0 overflow-y-auto rounded-2xl border border-[#d5def4] bg-white/85 p-4 shadow-[0_12px_28px_rgba(39,62,145,0.09)] backdrop-blur">
           <div className="mb-4 flex items-center gap-3">
             <img src={Chatavatar} alt="assistant avatar" className="h-11 w-11 rounded-xl object-cover" />
             <div>
