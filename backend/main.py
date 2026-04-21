@@ -12,6 +12,7 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import make_msgid
+from html import escape
 from imaplib import IMAP4_SSL
 from pathlib import Path
 from typing import Any, Dict, List, Optional
