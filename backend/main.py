@@ -572,6 +572,73 @@ def _generate_rfp_pdf_file(text: str) -> str:
     return filename
 
 
+def _generate_evaluation_pdf_file(markdown_text: str, proposal_id: int) -> str:
+    filename = f"proposal_{proposal_id}_evaluation.pdf"
+    filepath = PDF_DIR / filename
+    template_path = BASE_DIR / "template.html"
+    try:
+        from render_pdf import generate_pdf
+
+        generate_pdf(markdown_text, str(template_path), str(filepath))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate evaluation PDF: {exc}") from exc
+    return filename
+
+
+def _build_evaluation_markdown(
+    proposal: ProposalModel,
+    rfp_name: str,
+    overall_score: Optional[float] = None,
+    scores: Optional[Dict[str, float]] = None,
+) -> str:
+    lines = [
+        "# Proposal Evaluation Report",
+        "",
+        f"**RFP:** {rfp_name or f'RFP {proposal.rfp_id}'}",
+        f"**Vendor:** {proposal.vendor or '-'}",
+        f"**Uploaded:** {proposal.created_at or '-'}",
+        f"**Overall Score:** {('-' if overall_score is None else f'{overall_score:.1f}/100')}",
+        "",
+        "## Executive Summary",
+        proposal.report or "No evaluation summary available.",
+    ]
+    if scores:
+        lines.extend(
+            [
+                "",
+                "## Score Breakdown",
+            ]
+        )
+        for name, value in scores.items():
+            lines.append(f"- {name}: {value:.1f}/20")
+    return "\n".join(lines)
+
+
+def _ensure_proposal_evaluation_pdf(
+    db: Session,
+    proposal: ProposalModel,
+    rfp_name: str,
+    overall_score: Optional[float] = None,
+    scores: Optional[Dict[str, float]] = None,
+) -> str:
+    if proposal.pdf_summary:
+        existing_path = PDF_DIR / proposal.pdf_summary
+        if existing_path.exists():
+            return proposal.pdf_summary
+
+    markdown_text = _build_evaluation_markdown(
+        proposal=proposal,
+        rfp_name=rfp_name,
+        overall_score=overall_score if overall_score is not None else proposal.score,
+        scores=scores,
+    )
+    pdf_filename = _generate_evaluation_pdf_file(markdown_text, proposal.id)
+    proposal.pdf_summary = pdf_filename
+    db.commit()
+    db.refresh(proposal)
+    return pdf_filename
+
+
 def _persist_rfp_document(db: Session, text: str, name: str) -> RFPModel:
     filename = _generate_rfp_pdf_file(text)
     rfp = RFPModel(name=name, pdf_filename=filename, requirements=text, pdf_path=f"/pdfs/{filename}")
@@ -1498,6 +1565,32 @@ def download_proposal_file(proposal_id: int, db: Session = Depends(get_db)):
     return FileResponse(str(filepath), media_type="application/pdf", filename=filepath.name)
 
 
+@app.get("/proposals/{proposal_id}/evaluation-pdf")
+def download_proposal_evaluation_pdf(proposal_id: int, db: Session = Depends(get_db)):
+    proposal = (
+        db.query(ProposalModel, RFPModel)
+        .join(RFPModel, ProposalModel.rfp_id == RFPModel.id)
+        .filter(ProposalModel.id == proposal_id)
+        .first()
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    proposal_record, rfp = proposal
+    if proposal_record.score is None and not (proposal_record.report or "").strip():
+        raise HTTPException(status_code=409, detail="Evaluation report is not ready for this proposal.")
+
+    filename = _ensure_proposal_evaluation_pdf(
+        db=db,
+        proposal=proposal_record,
+        rfp_name=rfp.name or f"RFP {proposal_record.rfp_id}",
+    )
+    filepath = PDF_DIR / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Evaluation PDF not found")
+    return FileResponse(str(filepath), media_type="application/pdf", filename=filepath.name)
+
+
 @app.get("/rfps/{rfp_id}/proposals")
 def list_proposals(rfp_id: int, db: Session = Depends(get_db)):
     proposals = (
@@ -1694,24 +1787,25 @@ Constraints:
     if not (proposal.vendor or "").strip() and vendor:
         proposal.vendor = vendor
 
+    score_breakdown = {
+        "Technical": technical,
+        "Cost": cost,
+        "Compliance": compliance,
+        "Risk": risk,
+        "Experience": experience,
+    }
+
     try:
         from jinja2 import Template
         from score_chart import render_score_dashboard_base64
         from weasyprint import HTML
 
-        scores = {
-            "Technical": technical,
-            "Cost": cost,
-            "Compliance": compliance,
-            "Risk": risk,
-            "Experience": experience,
-        }
-        chart_b64 = render_score_dashboard_base64(scores, overall_score)
+        chart_b64 = render_score_dashboard_base64(score_breakdown, overall_score)
         rfp_name = rfp.name or f"RFP #{rfp_id}"
         proposal_date = proposal.created_at or now_iso()
         weighted_rows = "".join(
             f"<tr><td>{name}</td><td>{val:.1f}/20</td><td>{int(round((float(val)/20)*100))}%</td></tr>"
-            for name, val in scores.items()
+            for name, val in score_breakdown.items()
         )
         decision_tag = "Strong Candidate" if overall_score >= 80 else "Conditional Review" if overall_score >= 60 else "High Risk"
 
@@ -1758,12 +1852,24 @@ Constraints:
             tpl = Template(handle.read())
         html_out = tpl.render(content=html_body)
 
-        pdf_filename = f"{rfp_id}_evaluation.pdf"
+        pdf_filename = f"proposal_{proposal.id}_evaluation.pdf"
         pdf_path = PDF_DIR / pdf_filename
         HTML(string=html_out, base_url=str(BASE_DIR)).write_pdf(str(pdf_path))
         proposal.pdf_summary = pdf_filename
     except Exception:
-        pass
+        logger.exception("proposal evaluation pdf generation via weasyprint failed proposal_id=%s", proposal.id)
+
+    if not proposal.pdf_summary:
+        try:
+            _ensure_proposal_evaluation_pdf(
+                db=db,
+                proposal=proposal,
+                rfp_name=rfp.name or f"RFP #{rfp_id}",
+                overall_score=overall_score,
+                scores=score_breakdown,
+            )
+        except Exception:
+            logger.exception("proposal evaluation pdf fallback generation failed proposal_id=%s", proposal.id)
 
     db.commit()
     db.refresh(proposal)

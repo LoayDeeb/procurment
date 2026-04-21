@@ -289,14 +289,14 @@ export default function RfpDetail() {
                                 >
                                   Source
                                 </a>
-                                {proposal.pdf_summary ? (
-                                  <a
-                                    href={`${API_BASE}/pdfs/${proposal.pdf_summary}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="rounded-lg bg-[#273E91] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#20357d]"
-                                  >
-                                    Evaluation PDF
+                                {proposal.score !== null && proposal.score !== undefined ? (
+                                    <a
+                                      href={`${API_BASE}/proposals/${proposal.id}/evaluation-pdf`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="rounded-lg bg-[#273E91] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#20357d]"
+                                    >
+                                      Evaluation PDF
                                   </a>
                                 ) : (
                                   <span className="rounded-lg border border-[#eceff8] px-3 py-1.5 text-xs text-[#7a8399]">Not ready</span>

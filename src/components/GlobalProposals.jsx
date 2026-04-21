@@ -200,9 +200,9 @@ export default function GlobalProposals() {
                             >
                               Source
                             </a>
-                            {proposal.pdf_summary ? (
+                            {proposal.score !== null && proposal.score !== undefined ? (
                               <a
-                                href={`${API_BASE}/pdfs/${proposal.pdf_summary}`}
+                                href={`${API_BASE}/proposals/${proposal.id}/evaluation-pdf`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="rounded-lg bg-[#273E91] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#20357d]"
