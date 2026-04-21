@@ -1,8 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient, formatApiError } from '../config/http';
 
+function stakeholderRowId() {
+  return `stakeholder-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function emptyStakeholder() {
-  return { role: '', name: '', email: '' };
+  return { id: stakeholderRowId(), role: '', name: '', email: '' };
+}
+
+function normalizeStakeholders(items) {
+  if (!Array.isArray(items) || !items.length) return [emptyStakeholder()];
+  return items.map((item) => ({
+    id: item.id || stakeholderRowId(),
+    role: item.role || '',
+    name: item.name || '',
+    email: item.email || '',
+  }));
 }
 
 export default function WorkflowSettings() {
@@ -23,7 +37,7 @@ export default function WorkflowSettings() {
       const data = res.data || {};
       setRequesterName(data.requester_name || '');
       setRequesterEmail(data.requester_email || '');
-      setStakeholders(Array.isArray(data.stakeholders) && data.stakeholders.length ? data.stakeholders : [emptyStakeholder()]);
+      setStakeholders(normalizeStakeholders(data.stakeholders));
       setStatusMeta({
         workflow_ready: Boolean(data.workflow_ready),
         gmail_configured: Boolean(data.gmail_configured),
@@ -89,7 +103,7 @@ export default function WorkflowSettings() {
         stakeholders: cleanedStakeholders,
       });
       const data = res.data || {};
-      setStakeholders(Array.isArray(data.stakeholders) && data.stakeholders.length ? data.stakeholders : [emptyStakeholder()]);
+      setStakeholders(normalizeStakeholders(data.stakeholders));
       setStatusMeta({
         workflow_ready: Boolean(data.workflow_ready),
         gmail_configured: Boolean(data.gmail_configured),
@@ -168,7 +182,7 @@ export default function WorkflowSettings() {
 
               <div className="mt-4 space-y-4">
                 {stakeholders.map((stakeholder, index) => (
-                  <div key={`${index}-${stakeholder.role}-${stakeholder.email}`} className="grid gap-3 rounded-2xl border border-[#dde5f7] bg-white p-4 md:grid-cols-[1fr_1fr_1.3fr_auto]">
+                  <div key={stakeholder.id} className="grid gap-3 rounded-2xl border border-[#dde5f7] bg-white p-4 md:grid-cols-[1fr_1fr_1.3fr_auto]">
                     <input
                       value={stakeholder.role}
                       onChange={(e) => updateStakeholder(index, 'role', e.target.value)}
