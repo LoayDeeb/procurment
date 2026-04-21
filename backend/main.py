@@ -585,6 +585,23 @@ def _generate_evaluation_pdf_file(markdown_text: str, proposal_id: int) -> str:
     return filename
 
 
+def _render_evaluation_pdf_html(html_body: str, proposal_id: int) -> str:
+    filename = f"proposal_{proposal_id}_evaluation.pdf"
+    filepath = PDF_DIR / filename
+    template_path = BASE_DIR / "template.html"
+    try:
+        from jinja2 import Template
+        from weasyprint import HTML
+
+        with template_path.open("r", encoding="utf-8") as handle:
+            tpl = Template(handle.read())
+        html_out = tpl.render(content=html_body)
+        HTML(string=html_out, base_url=str(BASE_DIR)).write_pdf(str(filepath))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to render evaluation PDF: {exc}") from exc
+    return filename
+
+
 def _build_evaluation_markdown(
     proposal: ProposalModel,
     rfp_name: str,
@@ -614,6 +631,119 @@ def _build_evaluation_markdown(
     return "\n".join(lines)
 
 
+def _load_evaluation_payload(proposal: ProposalModel) -> Dict[str, Any]:
+    raw = proposal.evaluation_payload or ""
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _build_evaluation_html_body(
+    proposal: ProposalModel,
+    rfp_name: str,
+    overall_score: Optional[float] = None,
+    scores: Optional[Dict[str, float]] = None,
+) -> str:
+    payload = _load_evaluation_payload(proposal)
+    summary = str(payload.get("summary") or proposal.report or "No evaluation summary available.")
+    score_map = scores or payload.get("scores") or {}
+    normalized_scores = {
+        "Technical": _clamp(_to_float(score_map.get("Technical"), 0.0), 0.0, 20.0),
+        "Cost": _clamp(_to_float(score_map.get("Cost"), 0.0), 0.0, 20.0),
+        "Compliance": _clamp(_to_float(score_map.get("Compliance"), 0.0), 0.0, 20.0),
+        "Risk": _clamp(_to_float(score_map.get("Risk"), 0.0), 0.0, 20.0),
+        "Experience": _clamp(_to_float(score_map.get("Experience"), 0.0), 0.0, 20.0),
+    }
+    effective_overall = overall_score if overall_score is not None else _to_float(proposal.score, 0.0)
+    strengths = payload.get("strengths") if isinstance(payload.get("strengths"), list) else []
+    risks = payload.get("risks") if isinstance(payload.get("risks"), list) else []
+    missing_requirements = payload.get("missing_requirements") if isinstance(payload.get("missing_requirements"), list) else []
+    confidence = _clamp(_to_float(payload.get("confidence"), 0.0), 0.0, 1.0)
+
+    chart_b64 = None
+    try:
+        from score_chart import render_score_dashboard_base64
+
+        if any(value > 0 for value in normalized_scores.values()):
+            chart_b64 = render_score_dashboard_base64(normalized_scores, effective_overall)
+    except Exception:
+        chart_b64 = None
+
+    weighted_rows = "".join(
+        f"<tr><td>{name}</td><td>{val:.1f}/20</td><td>{int(round((float(val)/20)*100))}%</td></tr>"
+        for name, val in normalized_scores.items()
+    )
+    decision_tag = "Strong Candidate" if effective_overall >= 80 else "Conditional Review" if effective_overall >= 60 else "High Risk"
+
+    def _render_list(title: str, items: List[str], empty_text: str) -> str:
+        if not items:
+            return (
+                f'<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">'
+                f'<h3 style="margin:0 0 8px 0;color:#1f3280;">{title}</h3>'
+                f'<p style="margin:0;color:#5d6b8a;">{empty_text}</p></section>'
+            )
+        entries = "".join(f"<li style=\"margin-bottom:6px;\">{escape(str(item))}</li>" for item in items)
+        return (
+            f'<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">'
+            f'<h3 style="margin:0 0 8px 0;color:#1f3280;">{title}</h3>'
+            f'<ul style="margin:0;padding-left:18px;color:#33426f;">{entries}</ul></section>'
+        )
+
+    chart_section = ""
+    if chart_b64:
+        chart_section = f"""
+<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+  <h3 style="margin:0 0 10px 0;color:#1f3280;">Scoring Dashboard</h3>
+  <div style="text-align:center;">
+    <img src="{chart_b64}" style="width:100%;max-width:860px;border:1px solid #edf2fd;border-radius:12px;" />
+  </div>
+</section>
+"""
+
+    return f"""
+<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;background:#f8fbff;margin-bottom:12px;">
+  <h2 style="margin:0 0 8px 0;color:#1f3280;">Proposal Evaluation Report</h2>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>RFP:</b> {escape(rfp_name or f'RFP {proposal.rfp_id}')}</div>
+    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Vendor:</b> {escape(proposal.vendor or '-')}</div>
+    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Upload Date:</b> {escape(proposal.created_at or '-')}</div>
+    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Decision Tag:</b> {decision_tag}</div>
+    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Confidence:</b> {int(round(confidence * 100))}%</div>
+  </div>
+</section>
+
+<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+  <h3 style="margin:0 0 8px 0;color:#1f3280;">Executive Summary</h3>
+  <p style="margin:0;color:#33426f;">{escape(summary)}</p>
+</section>
+
+{chart_section}
+
+<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+  <h3 style="margin:0 0 10px 0;color:#1f3280;">Weighted Score Table</h3>
+  <table style="width:100%;border-collapse:collapse;">
+    <thead>
+      <tr style="background:#eef4ff;color:#1f3280;">
+        <th style="border:1px solid #dbe4f6;padding:8px;text-align:left;">Dimension</th>
+        <th style="border:1px solid #dbe4f6;padding:8px;text-align:left;">Raw Score</th>
+        <th style="border:1px solid #dbe4f6;padding:8px;text-align:left;">Normalized</th>
+      </tr>
+    </thead>
+    <tbody>{weighted_rows}</tbody>
+  </table>
+  <p style="margin-top:10px;"><b>Overall Score:</b> {int(round(effective_overall))}/100</p>
+</section>
+
+{_render_list("Strengths", strengths, "No strengths were captured in the stored evaluation payload.")}
+{_render_list("Key Risks", risks, "No key risks were captured in the stored evaluation payload.")}
+{_render_list("Missing Requirements", missing_requirements, "No missing requirements were captured in the stored evaluation payload.")}
+"""
+
+
 def _ensure_proposal_evaluation_pdf(
     db: Session,
     proposal: ProposalModel,
@@ -626,13 +756,23 @@ def _ensure_proposal_evaluation_pdf(
         if existing_path.exists():
             return proposal.pdf_summary
 
-    markdown_text = _build_evaluation_markdown(
-        proposal=proposal,
-        rfp_name=rfp_name,
-        overall_score=overall_score if overall_score is not None else proposal.score,
-        scores=scores,
-    )
-    pdf_filename = _generate_evaluation_pdf_file(markdown_text, proposal.id)
+    payload = _load_evaluation_payload(proposal)
+    if payload:
+        html_body = _build_evaluation_html_body(
+            proposal=proposal,
+            rfp_name=rfp_name,
+            overall_score=overall_score if overall_score is not None else proposal.score,
+            scores=scores,
+        )
+        pdf_filename = _render_evaluation_pdf_html(html_body, proposal.id)
+    else:
+        markdown_text = _build_evaluation_markdown(
+            proposal=proposal,
+            rfp_name=rfp_name,
+            overall_score=overall_score if overall_score is not None else proposal.score,
+            scores=scores,
+        )
+        pdf_filename = _generate_evaluation_pdf_file(markdown_text, proposal.id)
     proposal.pdf_summary = pdf_filename
     db.commit()
     db.refresh(proposal)
@@ -1794,67 +1934,27 @@ Constraints:
         "Risk": risk,
         "Experience": experience,
     }
+    proposal.evaluation_payload = json.dumps(
+        {
+            "vendor": vendor or proposal.vendor or "",
+            "summary": report,
+            "scores": score_breakdown,
+            "strengths": result.get("strengths") if isinstance(result.get("strengths"), list) else [],
+            "risks": result.get("risks") if isinstance(result.get("risks"), list) else [],
+            "missing_requirements": result.get("missing_requirements") if isinstance(result.get("missing_requirements"), list) else [],
+            "confidence": _clamp(_to_float(result.get("confidence"), 0.0), 0.0, 1.0),
+        },
+        ensure_ascii=False,
+    )
 
     try:
-        from jinja2 import Template
-        from score_chart import render_score_dashboard_base64
-        from weasyprint import HTML
-
-        chart_b64 = render_score_dashboard_base64(score_breakdown, overall_score)
-        rfp_name = rfp.name or f"RFP #{rfp_id}"
-        proposal_date = proposal.created_at or now_iso()
-        weighted_rows = "".join(
-            f"<tr><td>{name}</td><td>{val:.1f}/20</td><td>{int(round((float(val)/20)*100))}%</td></tr>"
-            for name, val in score_breakdown.items()
+        html_body = _build_evaluation_html_body(
+            proposal=proposal,
+            rfp_name=rfp.name or f"RFP #{rfp_id}",
+            overall_score=overall_score,
+            scores=score_breakdown,
         )
-        decision_tag = "Strong Candidate" if overall_score >= 80 else "Conditional Review" if overall_score >= 60 else "High Risk"
-
-        html_body = f"""
-<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;background:#f8fbff;margin-bottom:12px;">
-  <h2 style="margin:0 0 8px 0;color:#1f3280;">Proposal Evaluation Report</h2>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;">
-    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>RFP:</b> {rfp_name}</div>
-    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Vendor:</b> {proposal.vendor or '-'}</div>
-    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Upload Date:</b> {proposal_date}</div>
-    <div style="background:#fff;border:1px solid #d9e4fa;border-radius:10px;padding:8px 12px;"><b>Decision Tag:</b> {decision_tag}</div>
-  </div>
-</section>
-
-<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
-  <h3 style="margin:0 0 8px 0;color:#1f3280;">Executive Summary</h3>
-  <p style="margin:0;color:#33426f;">{report}</p>
-</section>
-
-<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
-  <h3 style="margin:0 0 10px 0;color:#1f3280;">Scoring Dashboard</h3>
-  <div style="text-align:center;">
-    <img src="{chart_b64}" style="width:100%;max-width:860px;border:1px solid #edf2fd;border-radius:12px;" />
-  </div>
-</section>
-
-<section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
-  <h3 style="margin:0 0 10px 0;color:#1f3280;">Weighted Score Table</h3>
-  <table style="width:100%;border-collapse:collapse;">
-    <thead>
-      <tr style="background:#eef4ff;color:#1f3280;">
-        <th style="border:1px solid #dbe4f6;padding:8px;text-align:left;">Dimension</th>
-        <th style="border:1px solid #dbe4f6;padding:8px;text-align:left;">Raw Score</th>
-        <th style="border:1px solid #dbe4f6;padding:8px;text-align:left;">Normalized</th>
-      </tr>
-    </thead>
-    <tbody>{weighted_rows}</tbody>
-  </table>
-  <p style="margin-top:10px;"><b>Overall Score:</b> {int(round(overall_score))}/100</p>
-</section>
-"""
-        template_path = BASE_DIR / "template.html"
-        with template_path.open("r", encoding="utf-8") as handle:
-            tpl = Template(handle.read())
-        html_out = tpl.render(content=html_body)
-
-        pdf_filename = f"proposal_{proposal.id}_evaluation.pdf"
-        pdf_path = PDF_DIR / pdf_filename
-        HTML(string=html_out, base_url=str(BASE_DIR)).write_pdf(str(pdf_path))
+        pdf_filename = _render_evaluation_pdf_html(html_body, proposal.id)
         proposal.pdf_summary = pdf_filename
     except Exception:
         logger.exception("proposal evaluation pdf generation via weasyprint failed proposal_id=%s", proposal.id)

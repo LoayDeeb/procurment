@@ -27,6 +27,7 @@ class Proposal(Base):
     score = Column(Float, nullable=True)
     vendor = Column(String, nullable=True)
     report = Column(Text, nullable=True)
+    evaluation_payload = Column(Text, nullable=True)
     pdf_summary = Column(String, nullable=True)
     created_at = Column(String, nullable=True)
     rfp = relationship("RFP", back_populates="proposals")
