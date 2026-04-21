@@ -28,7 +28,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session, joinedload
 
 try:
-    from .database import SessionLocal, init_db
+    from .database import SessionLocal, ensure_db_schema, init_db
     from .models import (
         ProcurementConfig as ProcurementConfigModel,
         Proposal as ProposalModel,
@@ -37,7 +37,7 @@ try:
         StakeholderRequest as StakeholderRequestModel,
     )
 except ImportError:
-    from database import SessionLocal, init_db
+    from database import SessionLocal, ensure_db_schema, init_db
     from models import (
         ProcurementConfig as ProcurementConfigModel,
         Proposal as ProposalModel,
@@ -195,6 +195,7 @@ def now_iso() -> str:
 
 
 def get_db():
+    ensure_db_schema()
     db = SessionLocal()
     try:
         yield db
