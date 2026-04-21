@@ -7,6 +7,7 @@ export default function Sidebar({ currentPage, onSelectPage, isMobileOpen, onClo
     { key: 'proposals', label: 'Submission Queue', icon: 'file-plus' },
     { key: 'globalproposals', label: 'Proposal Portfolio', icon: 'file-stack' },
     { key: 'dashboard', label: 'Analytics', icon: 'chart' },
+    { key: 'settings', label: 'Workflow Settings', icon: 'gear' },
   ];
 
   const renderIcon = (type) => {

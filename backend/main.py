@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, joinedload
 try:
     from .database import SessionLocal, init_db
     from .models import (
+        ProcurementConfig as ProcurementConfigModel,
         Proposal as ProposalModel,
         RFP as RFPModel,
         RfpWorkflowRequest as RfpWorkflowRequestModel,
@@ -38,6 +39,7 @@ try:
 except ImportError:
     from database import SessionLocal, init_db
     from models import (
+        ProcurementConfig as ProcurementConfigModel,
         Proposal as ProposalModel,
         RFP as RFPModel,
         RfpWorkflowRequest as RfpWorkflowRequestModel,
@@ -141,6 +143,53 @@ WORKFLOW_SENT_REPLY = (
 )
 
 
+def _normalize_stakeholders(items: Any) -> List[Dict[str, str]]:
+    stakeholders: List[Dict[str, str]] = []
+    if not isinstance(items, list):
+        return stakeholders
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip()
+        name = str(item.get("name") or role or "").strip()
+        email = str(item.get("email") or "").strip()
+        if role and email:
+            stakeholders.append({"role": role, "name": name or role, "email": email})
+    return stakeholders
+
+
+def _load_persisted_procurement_config(db: Optional[Session] = None) -> Optional[ProcurementConfigModel]:
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
+    try:
+        return db.query(ProcurementConfigModel).order_by(ProcurementConfigModel.id.asc()).first()
+    finally:
+        if close_db:
+            db.close()
+
+
+def _get_effective_workflow_config(db: Optional[Session] = None) -> Dict[str, Any]:
+    config = _load_persisted_procurement_config(db)
+    requester_name = DEFAULT_REQUESTER_NAME
+    requester_email = DEFAULT_REQUESTER_EMAIL
+    stakeholders = list(SYSTEM_STAKEHOLDERS)
+    if config:
+        requester_name = (config.requester_name or requester_name or "Procurement Officer").strip()
+        requester_email = str(config.requester_email or requester_email or "").strip()
+        if config.stakeholders_json:
+            try:
+                stakeholders = _normalize_stakeholders(json.loads(config.stakeholders_json))
+            except Exception:
+                stakeholders = []
+    return {
+        "requester_name": requester_name or "Procurement Officer",
+        "requester_email": requester_email,
+        "stakeholders": stakeholders,
+    }
+
+
 def now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds")
 
@@ -157,11 +206,12 @@ def get_db():
 def on_startup():
     global _workflow_thread_started
     init_db()
+    effective_config = _get_effective_workflow_config()
     logger.info(
         "startup config workflow_ready=%s requester_email=%s stakeholder_count=%s gmail_configured=%s public_backend_url=%s",
         _workflow_mode_enabled(),
-        bool(DEFAULT_REQUESTER_EMAIL),
-        len(SYSTEM_STAKEHOLDERS),
+        bool(effective_config["requester_email"]),
+        len(effective_config["stakeholders"]),
         bool(GMAIL_ADDRESS and GMAIL_APP_PASSWORD),
         PUBLIC_BACKEND_URL,
     )
@@ -190,6 +240,12 @@ class WorkflowCreateRequest(BaseModel):
     requester_email: EmailStr
     title: Optional[str] = None
     messages: List[Dict[str, Any]]
+    stakeholders: List[StakeholderInput]
+
+
+class ProcurementConfigUpdateRequest(BaseModel):
+    requester_name: str = Field(..., min_length=1)
+    requester_email: EmailStr
     stakeholders: List[StakeholderInput]
 
 
@@ -395,9 +451,10 @@ def _ensure_email_configured():
 
 
 def _workflow_mode_enabled() -> bool:
+    config = _get_effective_workflow_config()
     return bool(
-        DEFAULT_REQUESTER_EMAIL
-        and SYSTEM_STAKEHOLDERS
+        config["requester_email"]
+        and config["stakeholders"]
         and GMAIL_ADDRESS
         and GMAIL_APP_PASSWORD
     )
@@ -663,19 +720,36 @@ def _serialize_workflow(workflow: RfpWorkflowRequestModel) -> Dict[str, Any]:
     }
 
 
+def _serialize_procurement_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "requester_name": config["requester_name"],
+        "requester_email": config["requester_email"],
+        "stakeholders": config["stakeholders"],
+        "workflow_ready": bool(
+            config["requester_email"]
+            and config["stakeholders"]
+            and GMAIL_ADDRESS
+            and GMAIL_APP_PASSWORD
+        ),
+        "gmail_configured": bool(GMAIL_ADDRESS and GMAIL_APP_PASSWORD),
+    }
+
+
 def _system_stakeholders_prompt_block() -> str:
-    if not SYSTEM_STAKEHOLDERS:
+    stakeholders = _get_effective_workflow_config()["stakeholders"]
+    if not stakeholders:
         return "No stakeholder directory is configured."
     lines = []
-    for item in SYSTEM_STAKEHOLDERS:
+    for item in stakeholders:
         lines.append(f'- {item["role"]}: {item["name"]} <{item["email"]}>')
     return "\n".join(lines)
 
 
 def _default_requester_prompt_block() -> str:
-    if DEFAULT_REQUESTER_EMAIL:
-        return f"{DEFAULT_REQUESTER_NAME} <{DEFAULT_REQUESTER_EMAIL}>"
-    return f"{DEFAULT_REQUESTER_NAME} <not configured>"
+    config = _get_effective_workflow_config()
+    if config["requester_email"]:
+        return f'{config["requester_name"]} <{config["requester_email"]}>'
+    return f'{config["requester_name"]} <not configured>'
 
 
 def _create_workflow_record(
@@ -1002,6 +1076,7 @@ def generate_elevenlabs_audio(text: str) -> bytes:
 def chat_rfp(req: ChatRequest):
     _ensure_openai_configured()
     workflow_mode = _workflow_mode_enabled()
+    workflow_config = _get_effective_workflow_config()
     tools: List[Dict[str, Any]] = []
     if not workflow_mode:
         tools.append(
@@ -1050,8 +1125,8 @@ def chat_rfp(req: ChatRequest):
         "chat_rfp request workflow_mode=%s tools=%s requester_default=%s stakeholder_count=%s message_count=%s",
         workflow_mode,
         [tool["name"] for tool in tools],
-        DEFAULT_REQUESTER_EMAIL or "",
-        len(SYSTEM_STAKEHOLDERS),
+        workflow_config["requester_email"] or "",
+        len(workflow_config["stakeholders"]),
         len(req.messages),
     )
 
@@ -1121,8 +1196,8 @@ def chat_rfp(req: ChatRequest):
                     arguments = json.loads(arguments)
                 except Exception:
                     arguments = {}
-            requester_name = str(arguments.get("requester_name") or DEFAULT_REQUESTER_NAME).strip() if isinstance(arguments, dict) else DEFAULT_REQUESTER_NAME
-            requester_email = str(arguments.get("requester_email") or DEFAULT_REQUESTER_EMAIL).strip() if isinstance(arguments, dict) else DEFAULT_REQUESTER_EMAIL
+            requester_name = str(arguments.get("requester_name") or workflow_config["requester_name"]).strip() if isinstance(arguments, dict) else workflow_config["requester_name"]
+            requester_email = str(arguments.get("requester_email") or workflow_config["requester_email"]).strip() if isinstance(arguments, dict) else workflow_config["requester_email"]
             title = str(arguments.get("title") or "Stakeholder RFP Request").strip() if isinstance(arguments, dict) else "Stakeholder RFP Request"
             stakeholder_emails = arguments.get("stakeholder_emails") if isinstance(arguments, dict) else []
             logger.info(
@@ -1133,9 +1208,9 @@ def chat_rfp(req: ChatRequest):
                 len(stakeholder_emails) if isinstance(stakeholder_emails, list) else 0,
             )
             if not requester_name or not requester_email:
-                raise HTTPException(status_code=503, detail="DEFAULT_REQUESTER_NAME and DEFAULT_REQUESTER_EMAIL must be configured.")
-            if not SYSTEM_STAKEHOLDERS:
-                raise HTTPException(status_code=503, detail="SYSTEM_STAKEHOLDERS_JSON is not configured.")
+                raise HTTPException(status_code=503, detail="Requester name and requester email must be configured.")
+            if not workflow_config["stakeholders"]:
+                raise HTTPException(status_code=503, detail="At least one stakeholder must be configured.")
             _ensure_email_configured()
             db = SessionLocal()
             try:
@@ -1164,7 +1239,7 @@ def chat_rfp(req: ChatRequest):
                     requester_email=requester_email,
                     title=title,
                     normalized_messages=normalized_messages,
-                    stakeholders=SYSTEM_STAKEHOLDERS,
+                    stakeholders=workflow_config["stakeholders"],
                 )
                 _send_stakeholder_requests(db, workflow, custom_emails=stakeholder_emails if isinstance(stakeholder_emails, list) else None)
                 logger.info("chat_rfp stakeholder workflow started workflow_id=%s", workflow.id)
@@ -1211,6 +1286,34 @@ def chat_rfp(req: ChatRequest):
 def elevenlabs_tts(req: TTSRequest):
     audio_bytes = generate_elevenlabs_audio(req.text)
     return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
+@app.get("/workflow/config")
+def get_workflow_config(db: Session = Depends(get_db)):
+    return _serialize_procurement_config(_get_effective_workflow_config(db))
+
+
+@app.put("/workflow/config")
+def update_workflow_config(req: ProcurementConfigUpdateRequest, db: Session = Depends(get_db)):
+    config = db.query(ProcurementConfigModel).order_by(ProcurementConfigModel.id.asc()).first()
+    timestamp = now_iso()
+    stakeholders = [
+        {"role": stakeholder.role, "name": stakeholder.name, "email": str(stakeholder.email)}
+        for stakeholder in req.stakeholders
+    ]
+    if not stakeholders:
+        raise HTTPException(status_code=400, detail="At least one stakeholder is required.")
+
+    if not config:
+        config = ProcurementConfigModel(created_at=timestamp, updated_at=timestamp)
+        db.add(config)
+
+    config.requester_name = req.requester_name.strip()
+    config.requester_email = str(req.requester_email).strip()
+    config.stakeholders_json = json.dumps(stakeholders, ensure_ascii=False)
+    config.updated_at = timestamp
+    db.commit()
+    return _serialize_procurement_config(_get_effective_workflow_config(db))
 
 
 @app.post("/workflow/rfp-requests")

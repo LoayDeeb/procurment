@@ -5,9 +5,10 @@ import RfpTaskTable from './components/RfpTaskTable';
 import RfpDashboard from './components/RfpDashboard';
 import RfpDetail from './components/RfpDetail';
 import GlobalProposals from './components/GlobalProposals';
+import WorkflowSettings from './components/WorkflowSettings';
 import backgroundImg from '../Assets/background.png';
 
-const VALID_PAGES = ['employees', 'rfpdetail', 'proposals', 'globalproposals', 'dashboard'];
+const VALID_PAGES = ['employees', 'rfpdetail', 'proposals', 'globalproposals', 'dashboard', 'settings'];
 const DEFAULT_PAGE = 'rfpdetail';
 
 function getPageFromHash() {
@@ -40,6 +41,10 @@ function App() {
     dashboard: {
       title: 'Analytics',
       subtitle: 'Monitor pipeline volume and scoring quality.',
+    },
+    settings: {
+      title: 'Workflow Settings',
+      subtitle: 'Define the static requester identity and stakeholder directory used by the agent.',
     },
   };
 
@@ -99,6 +104,7 @@ function App() {
           {page === 'dashboard' && <RfpDashboard />}
           {page === 'rfpdetail' && <RfpDetail />}
           {page === 'globalproposals' && <GlobalProposals />}
+          {page === 'settings' && <WorkflowSettings />}
         </div>
       </main>
     </div>

@@ -77,3 +77,14 @@ class StakeholderRequest(Base):
     updated_at = Column(String, nullable=False)
 
     workflow = relationship("RfpWorkflowRequest", back_populates="stakeholders")
+
+
+class ProcurementConfig(Base):
+    __tablename__ = "procurement_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requester_name = Column(String, nullable=False, default="Procurement Officer")
+    requester_email = Column(String, nullable=True)
+    stakeholders_json = Column(Text, nullable=True)
+    created_at = Column(String, nullable=False)
+    updated_at = Column(String, nullable=False)
