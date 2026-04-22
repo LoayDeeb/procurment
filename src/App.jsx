@@ -24,27 +24,27 @@ function App() {
   const pageMeta = {
     employees: {
       title: 'Procurement Team',
-      subtitle: 'Start with the right specialist for requirement capture and vendor strategy.',
+      subtitle: 'Choose the right specialist to start requirement capture and sourcing strategy.',
     },
     rfpdetail: {
       title: 'RFP Workspace',
-      subtitle: 'Manage one RFP end-to-end, including uploads, scoring, and reports.',
+      subtitle: 'Create, refine, score, and export each RFP from one workspace.',
     },
     proposals: {
-      title: 'Submission Queue',
-      subtitle: 'Track incoming proposal files and open per-RFP reviews.',
+      title: 'Submission Pipeline',
+      subtitle: 'Track active RFPs, incoming proposal files, and next review actions.',
     },
     globalproposals: {
-      title: 'Proposal Portfolio',
-      subtitle: 'Compare vendors and summaries across all RFPs.',
+      title: 'Evaluations',
+      subtitle: 'Compare vendors, scores, statuses, and summaries across all RFPs.',
     },
     dashboard: {
       title: 'Analytics',
-      subtitle: 'Monitor pipeline volume and scoring quality.',
+      subtitle: 'Monitor pipeline volume, review progress, and scoring quality.',
     },
     settings: {
       title: 'Workflow Settings',
-      subtitle: 'Define the static requester identity and stakeholder directory used by the agent.',
+      subtitle: 'Manage the requester identity and stakeholder directory used by the agent.',
     },
   };
 

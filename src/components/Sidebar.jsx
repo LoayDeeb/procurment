@@ -1,13 +1,55 @@
 import React from 'react';
 
 export default function Sidebar({ currentPage, onSelectPage, isMobileOpen, onCloseMobile }) {
-  const navItems = [
-    { key: 'employees', label: 'Team', icon: 'users' },
-    { key: 'rfpdetail', label: 'RFP Workspace', icon: 'gear' },
-    { key: 'proposals', label: 'Submission Queue', icon: 'file-plus' },
-    { key: 'globalproposals', label: 'Proposal Portfolio', icon: 'file-stack' },
-    { key: 'dashboard', label: 'Analytics', icon: 'chart' },
-    { key: 'settings', label: 'Workflow Settings', icon: 'gear' },
+  const navSections = [
+    {
+      title: 'Core Workflow',
+      caption: 'Move from intake to scoring with a clear sourcing flow.',
+      items: [
+        {
+          key: 'employees',
+          label: 'Team Directory',
+          description: 'Start requirement capture with the right procurement specialist.',
+          icon: 'users',
+        },
+        {
+          key: 'rfpdetail',
+          label: 'RFP Workspace',
+          description: 'Create, refine, score, and export each RFP from one place.',
+          icon: 'clipboard',
+        },
+        {
+          key: 'proposals',
+          label: 'Submission Pipeline',
+          description: 'Track open RFPs, incoming bids, and review actions.',
+          icon: 'inbox',
+        },
+        {
+          key: 'globalproposals',
+          label: 'Evaluations',
+          description: 'Compare vendor scores, reports, and status across all RFPs.',
+          icon: 'file-stack',
+        },
+        {
+          key: 'dashboard',
+          label: 'Analytics',
+          description: 'Monitor pipeline volume and overall evaluation quality.',
+          icon: 'chart',
+        },
+      ],
+    },
+    {
+      title: 'Administration',
+      caption: 'Maintain the shared defaults used by the procurement agent.',
+      items: [
+        {
+          key: 'settings',
+          label: 'Workflow Settings',
+          description: 'Manage requester identity and stakeholder contact details.',
+          icon: 'gear',
+        },
+      ],
+    },
   ];
 
   const renderIcon = (type) => {
@@ -15,6 +57,20 @@ export default function Sidebar({ currentPage, onSelectPage, isMobileOpen, onClo
       return (
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-5 w-5">
           <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+        </svg>
+      );
+    }
+    if (type === 'clipboard') {
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-5 w-5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5.25H7.5A2.25 2.25 0 0 0 5.25 7.5v10.5A2.25 2.25 0 0 0 7.5 20.25h9A2.25 2.25 0 0 0 18.75 18V7.5A2.25 2.25 0 0 0 16.5 5.25H15m-6 0a2.25 2.25 0 0 1 2.25-2.25h1.5A2.25 2.25 0 0 1 15 5.25m-6 0A2.25 2.25 0 0 0 11.25 7.5h1.5A2.25 2.25 0 0 0 15 5.25m-6 6h6m-6 3h6" />
+        </svg>
+      );
+    }
+    if (type === 'inbox') {
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-5 w-5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c0-.49.19-.961.53-1.312l2.757-2.848A2.25 2.25 0 0 1 8.655 4.95h6.69c.604 0 1.182.244 1.606.676l2.757 2.849c.34.35.53.82.53 1.311v7.714A2.25 2.25 0 0 1 18 19.75H6A2.25 2.25 0 0 1 3.75 17.5V9.776Zm.75 5.724h4.44a.75.75 0 0 0 .67-.414l.59-1.172a.75.75 0 0 1 .67-.414h2.26a.75.75 0 0 1 .67.414l.59 1.172a.75.75 0 0 0 .67.414h4.44" />
         </svg>
       );
     }
@@ -47,7 +103,7 @@ export default function Sidebar({ currentPage, onSelectPage, isMobileOpen, onClo
   };
 
   const classes = [
-    'w-72 flex-shrink-0 border-r border-[#243053] bg-[#192038] transition-all duration-300',
+    'w-72 flex-shrink-0 overflow-y-auto border-r border-[#243053] bg-[#192038] transition-all duration-300',
     'fixed inset-y-0 left-0 z-40 lg:static lg:translate-x-0',
     isMobileOpen ? 'translate-x-0' : '-translate-x-full',
   ].join(' ');
@@ -64,30 +120,68 @@ export default function Sidebar({ currentPage, onSelectPage, isMobileOpen, onClo
       ) : null}
       <aside className={classes}>
       <div className="p-5">
-        <div className="mb-8 rounded-lg border border-[#2c385d] bg-[#1e2743] px-4 py-3">
+        <div className="mb-6 rounded-2xl border border-[#2c385d] bg-[#1e2743] px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#8f9bc0]">Procurement Demo</p>
           <p className="mt-1 text-sm font-bold text-white">Sourcing Command Center</p>
+          <p className="mt-2 text-xs leading-5 text-[#a6b0d0]">
+            Follow the procurement workflow from intake to evaluation without losing context.
+          </p>
         </div>
-        <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8f9bc0]">Workflow</p>
-        <nav className="space-y-1.5">
-          {navItems.map((item) => (
-            <button
-              key={item.key}
-              className={`flex w-full items-center space-x-3 rounded-lg p-3 text-left transition-colors ${
-                currentPage === item.key
-                  ? 'bg-[#273E91] text-white'
-                  : 'text-gray-300 hover:bg-[#273E91] hover:text-white'
-              }`}
-              onClick={() => {
-                onSelectPage(item.key);
-                if (onCloseMobile) onCloseMobile();
-              }}
-            >
-              {renderIcon(item.icon)}
-              <span className="text-sm font-semibold">{item.label}</span>
-            </button>
+        <div className="space-y-5">
+          {navSections.map((section) => (
+            <div key={section.title}>
+              <div className="mb-2 px-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8f9bc0]">{section.title}</p>
+                <p className="mt-1 text-xs leading-5 text-[#7f8aad]">{section.caption}</p>
+              </div>
+              <nav className="space-y-2">
+                {section.items.map((item) => {
+                  const isActive = currentPage === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      className={`group flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition-all duration-200 ${
+                        isActive
+                          ? 'border-[#3c56b5] bg-[#243472] text-white shadow-[0_14px_26px_rgba(10,18,52,0.26)]'
+                          : 'border-transparent text-[#d0d6ea] hover:border-[#2d3d6a] hover:bg-[#202a47] hover:text-white'
+                      }`}
+                      aria-current={isActive ? 'page' : undefined}
+                      onClick={() => {
+                        onSelectPage(item.key);
+                        if (onCloseMobile) onCloseMobile();
+                      }}
+                    >
+                      <span
+                        className={`mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border ${
+                          isActive
+                            ? 'border-white/15 bg-white/10 text-white'
+                            : 'border-[#31406b] bg-[#1b2440] text-[#9eabcf] group-hover:border-[#405282] group-hover:text-white'
+                        }`}
+                      >
+                        {renderIcon(item.icon)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="text-sm font-semibold tracking-[0.01em]">{item.label}</span>
+                          {isActive ? (
+                            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#d5deff]">
+                              Current
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className={`mt-1 block text-xs leading-5 ${
+                          isActive ? 'text-[#dbe3ff]' : 'text-[#8f9bc0] group-hover:text-[#c9d2ee]'
+                        }`}>
+                          {item.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
           ))}
-        </nav>
+        </div>
       </div>
       </aside>
     </>
