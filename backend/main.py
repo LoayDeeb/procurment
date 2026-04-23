@@ -64,6 +64,7 @@ WORKFLOW_STATUS_DRAFTING = "drafting"
 WORKFLOW_STATUS_AWAITING = "awaiting_stakeholders"
 WORKFLOW_STATUS_ALL_REPLIES = "all_replies_received"
 WORKFLOW_STATUS_FINAL_READY = "final_rfp_generated"
+WORKFLOW_STATUS_DELIVERING = "delivering"
 WORKFLOW_STATUS_DELIVERED = "delivered"
 
 STAKEHOLDER_STATUS_PENDING = "pending"
@@ -1565,19 +1566,57 @@ def _poll_gmail_replies(db: Session) -> int:
 def _deliver_final_rfp_if_needed(db: Session, workflow: RfpWorkflowRequestModel):
     if not workflow.final_pdf_filename:
         return
-    if workflow.workflow_status == WORKFLOW_STATUS_DELIVERED:
+    if workflow.workflow_status == WORKFLOW_STATUS_DELIVERED or workflow.delivered_at:
         return
-    email_content = _build_requester_delivery_email(workflow)
-    _send_email(
-        to_address=workflow.requester_email,
-        subject=email_content["subject"],
-        body=email_content["body"],
-        html_body=email_content.get("html_body") or None,
+
+    claimed_at = now_iso()
+    claimed = (
+        db.query(RfpWorkflowRequestModel)
+        .filter(
+            RfpWorkflowRequestModel.id == workflow.id,
+            RfpWorkflowRequestModel.workflow_status == WORKFLOW_STATUS_FINAL_READY,
+            RfpWorkflowRequestModel.delivered_at.is_(None),
+        )
+        .update(
+            {
+                RfpWorkflowRequestModel.workflow_status: WORKFLOW_STATUS_DELIVERING,
+                RfpWorkflowRequestModel.updated_at: claimed_at,
+                RfpWorkflowRequestModel.last_error: None,
+            },
+            synchronize_session=False,
+        )
     )
-    workflow.workflow_status = WORKFLOW_STATUS_DELIVERED
-    workflow.delivered_at = now_iso()
-    workflow.updated_at = now_iso()
-    workflow.last_error = None
+    db.commit()
+    if not claimed:
+        return
+
+    delivery_workflow = (
+        db.query(RfpWorkflowRequestModel)
+        .filter(RfpWorkflowRequestModel.id == workflow.id)
+        .first()
+    )
+    if not delivery_workflow or not delivery_workflow.final_pdf_filename:
+        return
+
+    email_content = _build_requester_delivery_email(delivery_workflow)
+    try:
+        _send_email(
+            to_address=delivery_workflow.requester_email,
+            subject=email_content["subject"],
+            body=email_content["body"],
+            html_body=email_content.get("html_body") or None,
+        )
+    except Exception as exc:
+        delivery_workflow.workflow_status = WORKFLOW_STATUS_FINAL_READY
+        delivery_workflow.updated_at = now_iso()
+        delivery_workflow.last_error = f"Requester email delivery failed: {exc}"
+        db.commit()
+        raise
+
+    delivery_workflow.workflow_status = WORKFLOW_STATUS_DELIVERED
+    delivery_workflow.delivered_at = now_iso()
+    delivery_workflow.updated_at = now_iso()
+    delivery_workflow.last_error = None
     db.commit()
 
 
