@@ -555,6 +555,11 @@ export default function ChatPage({ user = { name: 'Procurement Officer', avatar:
                         </p>
                         <p className="mt-1"><span className="font-semibold">To:</span> {emailItem.email}</p>
                         <p className="mt-1"><span className="font-semibold">Subject:</span> {emailItem.subject}</p>
+                        {emailItem.html_body ? (
+                          <p className="mt-1 text-[#60709c]">
+                            <span className="font-semibold">Format:</span> HTML email with plain-text fallback
+                          </p>
+                        ) : null}
                         <p className="mt-1 whitespace-pre-wrap"><span className="font-semibold">Body:</span> {emailItem.body}</p>
                       </div>
                     ))}

@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import IntegrityError
 
 try:
     from .database import SessionLocal, ensure_db_schema, init_db
@@ -781,11 +782,43 @@ def _ensure_proposal_evaluation_pdf(
     return pdf_filename
 
 
-def _persist_rfp_document(db: Session, text: str, name: str) -> RFPModel:
+def _persist_rfp_document(
+    db: Session,
+    text: str,
+    name: str,
+    source_workflow_id: Optional[int] = None,
+) -> RFPModel:
+    if source_workflow_id is not None:
+        existing = (
+            db.query(RFPModel)
+            .filter(RFPModel.source_workflow_id == source_workflow_id)
+            .first()
+        )
+        if existing:
+            return existing
+
     filename = _generate_rfp_pdf_file(text)
-    rfp = RFPModel(name=name, pdf_filename=filename, requirements=text, pdf_path=f"/pdfs/{filename}")
+    rfp = RFPModel(
+        name=name,
+        pdf_filename=filename,
+        source_workflow_id=source_workflow_id,
+        requirements=text,
+        pdf_path=f"/pdfs/{filename}",
+    )
     db.add(rfp)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if source_workflow_id is not None:
+            existing = (
+                db.query(RFPModel)
+                .filter(RFPModel.source_workflow_id == source_workflow_id)
+                .first()
+            )
+            if existing:
+                return existing
+        raise
     db.refresh(rfp)
     return rfp
 
@@ -799,7 +832,354 @@ def generate_rfp_pdf(text: str) -> str:
         db.close()
 
 
-def _send_email(to_address: str, subject: str, body: str, extra_headers: Optional[Dict[str, str]] = None) -> str:
+def _render_html_list(items: List[str], ordered: bool = False) -> str:
+    tag = "ol" if ordered else "ul"
+    item_html = "".join(
+        f'<li style="margin: 0 0 8px 0;">{escape(item)}</li>'
+        for item in items
+        if str(item).strip()
+    )
+    if not item_html:
+        return ""
+    return (
+        f'<{tag} style="margin: 0; padding-left: 20px; color: #33426f; font-size: 14px; '
+        f'line-height: 22px;">{item_html}</{tag}>'
+    )
+
+
+def _text_to_email_html(text: str) -> str:
+    cleaned = (text or "").replace("\r\n", "\n").strip()
+    if not cleaned:
+        return (
+            '<p style="margin: 0; color: #33426f; font-size: 14px; line-height: 22px;">'
+            "No additional details were provided."
+            "</p>"
+        )
+
+    blocks = re.split(r"\n\s*\n", cleaned)
+    html_blocks: List[str] = []
+
+    for block in blocks:
+        lines = [line.strip() for line in block.split("\n") if line.strip()]
+        if not lines:
+            continue
+
+        if all(re.match("^(?:[-*]|\\u2022)\\s+", line) for line in lines):
+            items = [re.sub("^(?:[-*]|\\u2022)\\s+", "", line).strip() for line in lines]
+            html_blocks.append(_render_html_list(items))
+            continue
+
+        if all(re.match(r"^\d+[.)]\s+", line) for line in lines):
+            items = [re.sub(r"^\d+[.)]\s+", "", line).strip() for line in lines]
+            html_blocks.append(_render_html_list(items, ordered=True))
+            continue
+
+        paragraph = "<br />".join(escape(line) for line in lines)
+        html_blocks.append(
+            '<p style="margin: 0 0 14px 0; color: #33426f; font-size: 14px; line-height: 22px;">'
+            f"{paragraph}"
+            "</p>"
+        )
+
+    return "".join(html_blocks) or (
+        '<p style="margin: 0; color: #33426f; font-size: 14px; line-height: 22px;">'
+        "No additional details were provided."
+        "</p>"
+    )
+
+
+def _build_email_section(title: str, body_html: str) -> str:
+    return (
+        '<div style="margin: 0 0 18px 0; padding: 22px 24px; background: #ffffff; '
+        'border: 1px solid #d9e3f5; border-radius: 20px; box-shadow: 0 10px 24px rgba(39, 62, 145, 0.06);">'
+        f'<p style="margin: 0 0 14px 0; color: #60709c; font-size: 11px; font-weight: 700; '
+        f'letter-spacing: 0.08em; text-transform: uppercase;">{escape(title)}</p>'
+        f"{body_html}"
+        "</div>"
+    )
+
+
+def _build_highlight_band(label: str, value: str, tone: str = "blue") -> str:
+    tones = {
+        "blue": {
+            "bg": "#eef4ff",
+            "border": "#cbdafb",
+            "label": "#60709c",
+            "value": "#22367f",
+        },
+        "gold": {
+            "bg": "#fff7ea",
+            "border": "#efd29a",
+            "label": "#8f6a23",
+            "value": "#6f4f14",
+        },
+    }
+    palette = tones.get(tone, tones["blue"])
+    return (
+        f'<div style="display: inline-block; min-width: 180px; margin: 0 10px 10px 0; padding: 12px 14px; '
+        f'background: {palette["bg"]}; border: 1px solid {palette["border"]}; border-radius: 14px;">'
+        f'<p style="margin: 0 0 6px 0; color: {palette["label"]}; font-size: 10px; font-weight: 700; '
+        f'letter-spacing: 0.08em; text-transform: uppercase;">{escape(label)}</p>'
+        f'<p style="margin: 0; color: {palette["value"]}; font-size: 15px; line-height: 20px; font-weight: 700;">{escape(value)}</p>'
+        "</div>"
+    )
+
+
+def _build_reply_instruction_panel(title: str, steps: List[str], note: str = "") -> str:
+    note_html = ""
+    if note:
+        note_html = (
+            f'<p style="margin: 14px 0 0 0; color: #5f6b85; font-size: 12px; line-height: 19px;">{escape(note)}</p>'
+        )
+    return (
+        '<div style="margin: 0 0 18px 0; padding: 24px; background: linear-gradient(180deg, #243a88 0%, #1f2e69 100%); '
+        'border-radius: 22px; color: #ffffff;">'
+        f'<p style="margin: 0 0 14px 0; color: rgba(255,255,255,0.72); font-size: 11px; font-weight: 700; '
+        f'letter-spacing: 0.08em; text-transform: uppercase;">{escape(title)}</p>'
+        '<p style="margin: 0 0 14px 0; font-size: 22px; line-height: 28px; font-weight: 700;">Reply to this email thread</p>'
+        f'{_render_html_list(steps, ordered=True).replace("#33426f", "rgba(255,255,255,0.92)")}'
+        f"{note_html}"
+        "</div>"
+    )
+
+
+def _build_email_shell(
+    *,
+    preheader: str,
+    heading: str,
+    subtitle: str,
+    badge: str = "",
+    intro_html: str = "",
+    sections_html: List[str],
+    footer_html: str,
+) -> str:
+    badge_html = ""
+    if badge:
+        badge_html = (
+            '<div style="margin: 0 0 16px 0;">'
+            '<span style="display: inline-block; padding: 7px 13px; border-radius: 999px; '
+            'background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255,255,255,0.22); color: #ffffff; font-size: 11px; '
+            f'font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">{escape(badge)}</span>'
+            "</div>"
+        )
+
+    subtitle_html = ""
+    if subtitle:
+        subtitle_html = (
+            f'<p style="margin: 12px 0 0 0; color: rgba(255, 255, 255, 0.82); '
+            f'font-size: 14px; line-height: 22px;">{escape(subtitle)}</p>'
+        )
+
+    return (
+        "<!doctype html>"
+        '<html lang="en">'
+        '<body style="margin: 0; padding: 0; background: #edf2fd; font-family: Arial, Helvetica, sans-serif;">'
+        f'<div style="display: none; max-height: 0; overflow: hidden; opacity: 0; color: transparent;">{escape(preheader)}</div>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="width: 100%; background: #edf2fd; margin: 0; padding: 0;">'
+        '<tr><td align="center" style="padding: 28px 14px;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="max-width: 700px; width: 100%; background: #ffffff; border: 1px solid #d6dff1; '
+        'border-radius: 32px; overflow: hidden; box-shadow: 0 18px 40px rgba(34, 54, 127, 0.12);">'
+        '<tr><td style="padding: 0;">'
+        '<div style="padding: 36px 38px 34px 38px; background-color: #1f3178; '
+        'background: radial-gradient(circle at top right, rgba(255,255,255,0.16), transparent 36%), '
+        'linear-gradient(135deg, #243a88 0%, #1a2758 100%); '
+        'color: #ffffff;">'
+        '<p style="margin: 0 0 16px 0; color: rgba(255,255,255,0.62); font-size: 12px; line-height: 18px; letter-spacing: 0.08em; text-transform: uppercase;">Procurement Copilot</p>'
+        f"{badge_html}"
+        f'<h1 style="margin: 0; font-size: 32px; line-height: 38px; font-weight: 700;">{escape(heading)}</h1>'
+        f"{subtitle_html}"
+        "</div>"
+        "</td></tr>"
+        '<tr><td style="padding: 30px 38px 10px 38px;">'
+        f"{intro_html}"
+        "</td></tr>"
+        '<tr><td style="padding: 0 38px 12px 38px;">'
+        f'{"".join(sections_html)}'
+        "</td></tr>"
+        '<tr><td style="padding: 8px 38px 38px 38px;">'
+        f"{footer_html}"
+        "</td></tr>"
+        "</table>"
+        "</td></tr>"
+        "</table>"
+        "</body>"
+        "</html>"
+    )
+
+
+def _build_tracking_footer(token: str, requester_name: str, requester_email: str) -> str:
+    requester_line = requester_name.strip() or "Procurement Copilot"
+    if requester_email:
+        requester_line = f"{requester_line} ({requester_email})"
+    return (
+        '<div style="padding: 20px 22px; background: #fbfcff; border: 1px solid #dbe4f3; border-radius: 20px;">'
+        '<p style="margin: 0 0 6px 0; color: #60709c; font-size: 11px; font-weight: 700; '
+        'letter-spacing: 0.08em; text-transform: uppercase;">Tracking Token</p>'
+        f'<p style="margin: 0 0 10px 0; color: #22367f; font-size: 16px; font-weight: 700;">{escape(token)}</p>'
+        '<p style="margin: 0; color: #5f6b85; font-size: 13px; line-height: 20px;">'
+        "Keep this token in the email subject so the workflow can match your reply automatically."
+        "</p>"
+        "</div>"
+        f'<p style="margin: 16px 0 0 0; color: #6a7898; font-size: 12px; line-height: 19px;">'
+        f"Sent by Procurement Copilot on behalf of {escape(requester_line)}."
+        "</p>"
+    )
+
+
+def _build_stakeholder_email_html(
+    workflow: RfpWorkflowRequestModel,
+    stakeholder: StakeholderRequestModel,
+    token: str,
+    body: str,
+    custom_body: bool = False,
+) -> str:
+    summary_text = workflow.initial_summary or "No summary available."
+    top_bands = (
+        _build_highlight_band("Workflow", workflow.title, tone="blue")
+        + _build_highlight_band("Your Role", stakeholder.role, tone="gold")
+    )
+    intro_html = (
+        f'<p style="margin: 0 0 14px 0; color: #22367f; font-size: 20px; line-height: 28px; font-weight: 700;">'
+        f"Hello {escape(stakeholder.name)},"
+        "</p>"
+        f'<div style="margin: 0 0 18px 0;">{top_bands}</div>'
+    )
+
+    if custom_body:
+        intro_html += (
+            '<p style="margin: 0; color: #33426f; font-size: 15px; line-height: 24px;">'
+            f'Your input is needed for <strong>{escape(workflow.title)}</strong>.'
+            "</p>"
+        )
+        sections = [
+            _build_email_section("Message", _text_to_email_html(body)),
+            _build_reply_instruction_panel(
+                "Response Method",
+                [
+                    "Reply directly to this same email thread.",
+                    "Include requirements, constraints, approvals, risks, dependencies, and mandatory conditions.",
+                    "Keep the tracking token in the subject line.",
+                ],
+                note="No portal form is needed. Your email reply is the response channel.",
+            ),
+        ]
+    else:
+        sections = [
+            _build_email_section(
+                "Request Summary",
+                _text_to_email_html(summary_text),
+            ),
+            _build_email_section(
+                "What To Send",
+                _render_html_list(
+                    [
+                        "Business and functional requirements you own.",
+                        "Constraints, approvals, dependencies, and delivery assumptions.",
+                        "Operational, compliance, security, or legal risks.",
+                        "Any mandatory conditions that must appear in the final RFP.",
+                    ]
+                ),
+            ),
+            _build_reply_instruction_panel(
+                "Response Method",
+                [
+                    "Reply directly to this email thread.",
+                    "Add your requirements and any mandatory conditions.",
+                    "Keep the subject unchanged so the workflow can match your response automatically.",
+                ],
+                note="No external form or upload step is required unless you choose to attach supporting files.",
+            ),
+        ]
+        intro_html += (
+            '<p style="margin: 0; color: #33426f; font-size: 15px; line-height: 24px;">'
+            f"{escape(workflow.requester_name)} has started a procurement RFP workflow and needs your input as "
+            f"<strong>{escape(stakeholder.role)}</strong>."
+            "</p>"
+        )
+
+    return _build_email_shell(
+        preheader=f"Input needed from {stakeholder.role} for {workflow.title}",
+        heading="Stakeholder Input Needed",
+        subtitle=workflow.title,
+        badge=stakeholder.role,
+        intro_html=intro_html,
+        sections_html=sections,
+        footer_html=_build_tracking_footer(token, workflow.requester_name, workflow.requester_email),
+    )
+
+
+def _build_requester_delivery_email_html(workflow: RfpWorkflowRequestModel, download_url: str) -> str:
+    top_bands = (
+        _build_highlight_band("Workflow", workflow.title, tone="blue")
+        + _build_highlight_band("Workflow ID", str(workflow.id), tone="gold")
+    )
+    intro_html = (
+        f'<p style="margin: 0 0 14px 0; color: #22367f; font-size: 20px; line-height: 28px; font-weight: 700;">'
+        f"Hello {escape(workflow.requester_name)},"
+        "</p>"
+        f'<div style="margin: 0 0 18px 0;">{top_bands}</div>'
+        '<p style="margin: 0; color: #33426f; font-size: 15px; line-height: 24px;">'
+        "Your stakeholder requirements have been collected and the final RFP draft is ready."
+        "</p>"
+    )
+    button_html = (
+        f'<a href="{escape(download_url, quote=True)}" '
+        'style="display: inline-block; padding: 14px 20px; border-radius: 14px; background: #243a88; '
+        'color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; box-shadow: 0 10px 22px rgba(36, 58, 136, 0.28);">'
+        "Download Final RFP PDF"
+        "</a>"
+    )
+    sections = [
+        _build_email_section(
+            "Ready For Review",
+            (
+                '<p style="margin: 0 0 14px 0; color: #33426f; font-size: 15px; line-height: 24px;">'
+                "Use the link below to open the final PDF."
+                "</p>"
+                f'<p style="margin: 0 0 14px 0;">{button_html}</p>'
+                f'<p style="margin: 0; color: #5f6b85; font-size: 12px; line-height: 19px;">'
+                f"{escape(download_url)}"
+                "</p>"
+            ),
+        ),
+        _build_email_section(
+            "Workflow Details",
+            _render_html_list(
+                [
+                    f"Workflow ID: {workflow.id}",
+                    f"Title: {workflow.title}",
+                    "A copy is also available in the procurement application.",
+                ]
+            ),
+        ),
+    ]
+    footer_html = (
+        '<div style="padding: 18px 20px; background: #f7f9fe; border: 1px solid #dbe4f3; border-radius: 20px;">'
+        '<p style="margin: 0; color: #6a7898; font-size: 12px; line-height: 19px;">'
+        "Generated by Procurement Copilot after stakeholder responses were merged into the final draft."
+        "</p>"
+        "</div>"
+    )
+    return _build_email_shell(
+        preheader=f"Final RFP ready for {workflow.title}",
+        heading="Final RFP Ready",
+        subtitle=workflow.title,
+        badge="Delivery",
+        intro_html=intro_html,
+        sections_html=sections,
+        footer_html=footer_html,
+    )
+
+
+def _send_email(
+    to_address: str,
+    subject: str,
+    body: str,
+    html_body: Optional[str] = None,
+    extra_headers: Optional[Dict[str, str]] = None,
+) -> str:
     _ensure_email_configured()
     message = EmailMessage()
     message["From"] = GMAIL_ADDRESS
@@ -810,6 +1190,8 @@ def _send_email(to_address: str, subject: str, body: str, extra_headers: Optiona
         for key, value in extra_headers.items():
             message[key] = value
     message.set_content(body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
 
     with smtplib.SMTP_SSL(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT, timeout=30) as smtp:
         smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
@@ -837,15 +1219,25 @@ def _build_stakeholder_email(workflow: RfpWorkflowRequestModel, stakeholder: Sta
             "Thank you.",
         ]
     )
-    return {"subject": subject, "body": body}
+    return {
+        "subject": subject,
+        "body": body,
+        "html_body": _build_stakeholder_email_html(
+            workflow=workflow,
+            stakeholder=stakeholder,
+            token=token,
+            body=body,
+        ),
+    }
 
 
 def _send_stakeholder_requests(
     db: Session,
     workflow: RfpWorkflowRequestModel,
     custom_emails: Optional[List[Dict[str, str]]] = None,
-):
+) -> List[Dict[str, str]]:
     custom_by_role = {}
+    dispatched_emails: List[Dict[str, str]] = []
     for item in custom_emails or []:
         role = str(item.get("role") or "").strip().lower()
         if role:
@@ -854,25 +1246,51 @@ def _send_stakeholder_requests(
         if stakeholder.status == STAKEHOLDER_STATUS_RECEIVED:
             continue
         custom_email = custom_by_role.get((stakeholder.role or "").strip().lower())
-        email_content = {
-            "subject": str(custom_email.get("subject") or "").strip(),
-            "body": str(custom_email.get("body") or "").strip(),
-        } if custom_email else _build_stakeholder_email(workflow, stakeholder)
+        email_content = (
+            {
+                "subject": str(custom_email.get("subject") or "").strip(),
+                "body": str(custom_email.get("body") or "").strip(),
+                "html_body": str(custom_email.get("html_body") or "").strip(),
+            }
+            if custom_email
+            else _build_stakeholder_email(workflow, stakeholder)
+        )
         if not email_content["subject"] or not email_content["body"]:
             email_content = _build_stakeholder_email(workflow, stakeholder)
+        elif not email_content.get("html_body"):
+            token = f"[RFP-REQ-{workflow.id}-{stakeholder.id}]"
+            email_content["html_body"] = _build_stakeholder_email_html(
+                workflow=workflow,
+                stakeholder=stakeholder,
+                token=token,
+                body=email_content["body"],
+                custom_body=True,
+            )
         outbound_message_id = _send_email(
             to_address=stakeholder.email,
             subject=email_content["subject"],
             body=email_content["body"],
+            html_body=email_content.get("html_body") or None,
         )
         stakeholder.outbound_subject = email_content["subject"]
         stakeholder.outbound_message_id = outbound_message_id
         stakeholder.status = STAKEHOLDER_STATUS_REQUESTED
         stakeholder.updated_at = now_iso()
+        dispatched_emails.append(
+            {
+                "role": stakeholder.role,
+                "name": stakeholder.name,
+                "email": stakeholder.email,
+                "subject": email_content["subject"],
+                "body": email_content["body"],
+                "html_body": email_content.get("html_body") or "",
+            }
+        )
     workflow.workflow_status = WORKFLOW_STATUS_AWAITING
     workflow.updated_at = now_iso()
     workflow.last_error = None
     db.commit()
+    return dispatched_emails
 
 
 def _build_requester_delivery_email(workflow: RfpWorkflowRequestModel) -> Dict[str, str]:
@@ -892,7 +1310,11 @@ def _build_requester_delivery_email(workflow: RfpWorkflowRequestModel) -> Dict[s
             "Procurement Copilot",
         ]
     )
-    return {"subject": subject, "body": body}
+    return {
+        "subject": subject,
+        "body": body,
+        "html_body": _build_requester_delivery_email_html(workflow, download_url),
+    }
 
 
 def _serialize_stakeholder(stakeholder: StakeholderRequestModel) -> Dict[str, Any]:
@@ -1140,6 +1562,7 @@ def _deliver_final_rfp_if_needed(db: Session, workflow: RfpWorkflowRequestModel)
         to_address=workflow.requester_email,
         subject=email_content["subject"],
         body=email_content["body"],
+        html_body=email_content.get("html_body") or None,
     )
     workflow.workflow_status = WORKFLOW_STATUS_DELIVERED
     workflow.delivered_at = now_iso()
@@ -1163,7 +1586,12 @@ def _finalize_ready_workflows(db: Session, workflow_id: Optional[int] = None) ->
         if workflow.workflow_status == WORKFLOW_STATUS_ALL_REPLIES and not workflow.final_rfp_id:
             try:
                 final_text = _generate_final_rfp_text(workflow)
-                rfp = _persist_rfp_document(db, text=final_text, name=workflow.title)
+                rfp = _persist_rfp_document(
+                    db,
+                    text=final_text,
+                    name=workflow.title,
+                    source_workflow_id=workflow.id,
+                )
                 workflow.final_rfp_text = final_text
                 workflow.final_pdf_filename = rfp.pdf_filename
                 workflow.final_rfp_id = rfp.id
@@ -1450,25 +1878,12 @@ def chat_rfp(req: ChatRequest):
                     normalized_messages=normalized_messages,
                     stakeholders=workflow_config["stakeholders"],
                 )
-                _send_stakeholder_requests(db, workflow, custom_emails=stakeholder_emails if isinstance(stakeholder_emails, list) else None)
+                sent_emails = _send_stakeholder_requests(
+                    db,
+                    workflow,
+                    custom_emails=stakeholder_emails if isinstance(stakeholder_emails, list) else None,
+                )
                 logger.info("chat_rfp stakeholder workflow started workflow_id=%s", workflow.id)
-                sent_emails = []
-                email_lookup = {
-                    str(item.get("role") or "").strip().lower(): item
-                    for item in (stakeholder_emails if isinstance(stakeholder_emails, list) else [])
-                    if isinstance(item, dict)
-                }
-                for stakeholder in workflow.stakeholders:
-                    drafted = email_lookup.get((stakeholder.role or "").strip().lower(), {})
-                    sent_emails.append(
-                        {
-                            "role": stakeholder.role,
-                            "name": stakeholder.name,
-                            "email": stakeholder.email,
-                            "subject": drafted.get("subject") or stakeholder.outbound_subject or "",
-                            "body": drafted.get("body") or "",
-                        }
-                    )
                 reply_text = replace_numbers_with_arabic_words(WORKFLOW_SENT_REPLY).strip() or WORKFLOW_SENT_REPLY
                 logger.info("chat_rfp stakeholder workflow reply_length=%s", len(reply_text))
                 return {

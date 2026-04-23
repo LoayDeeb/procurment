@@ -11,6 +11,7 @@ class RFP(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     pdf_filename = Column(String, nullable=False)
+    source_workflow_id = Column(Integer, nullable=True)
     status = Column(String, default="Waiting for Proposal")
     score = Column(Float, nullable=True)
     requirements = Column(Text)

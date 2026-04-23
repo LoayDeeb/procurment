@@ -25,6 +25,18 @@ def ensure_db_schema():
         if "evaluation_payload" not in proposal_columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE proposals ADD COLUMN evaluation_payload TEXT"))
+    if "rfps" in tables:
+        rfp_columns = {column["name"] for column in inspector.get_columns("rfps")}
+        with engine.begin() as connection:
+            if "source_workflow_id" not in rfp_columns:
+                connection.execute(text("ALTER TABLE rfps ADD COLUMN source_workflow_id INTEGER"))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_rfps_source_workflow_id "
+                    "ON rfps(source_workflow_id) "
+                    "WHERE source_workflow_id IS NOT NULL"
+                )
+            )
     _schema_verified = True
 
 def init_db():

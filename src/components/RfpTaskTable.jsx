@@ -6,6 +6,41 @@ import { apiClient, formatApiError } from '../config/http';
 
 const PAGE_SIZE = 8;
 
+function normalizeRfpText(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getRfpDedupKey(rfp) {
+  const nameKey = normalizeRfpText(rfp?.name);
+  const requirementsKey = normalizeRfpText(rfp?.requirements);
+  if (nameKey && requirementsKey) {
+    return `requirements:${nameKey}:${requirementsKey}`;
+  }
+
+  const filenameKey = normalizeRfpText(rfp?.pdf_filename);
+  if (nameKey && filenameKey) {
+    return `file:${nameKey}:${filenameKey}`;
+  }
+
+  return `row:${rfp?.id ?? ''}`;
+}
+
+function pickPreferredRfp(current, candidate) {
+  const currentProposalCount = Number(current?.proposal_count ?? -1);
+  const candidateProposalCount = Number(candidate?.proposal_count ?? -1);
+  if (candidateProposalCount !== currentProposalCount) {
+    return candidateProposalCount > currentProposalCount ? candidate : current;
+  }
+
+  const currentHasSource = Boolean(current?.pdf_filename);
+  const candidateHasSource = Boolean(candidate?.pdf_filename);
+  if (currentHasSource !== candidateHasSource) {
+    return candidateHasSource ? candidate : current;
+  }
+
+  return Number(candidate?.id ?? 0) > Number(current?.id ?? 0) ? candidate : current;
+}
+
 export default function RfpTaskTable() {
   const [rfps, setRfps] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,11 +72,21 @@ export default function RfpTaskTable() {
     }
   };
 
+  const uniqueRfps = useMemo(() => {
+    const deduped = new Map();
+    rfps.forEach((rfp) => {
+      const key = getRfpDedupKey(rfp);
+      const existing = deduped.get(key);
+      deduped.set(key, existing ? pickPreferredRfp(existing, rfp) : rfp);
+    });
+    return Array.from(deduped.values()).sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  }, [rfps]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rfps;
-    return rfps.filter((rfp) => (rfp.name || '').toLowerCase().includes(q));
-  }, [rfps, search]);
+    if (!q) return uniqueRfps;
+    return uniqueRfps.filter((rfp) => (rfp.name || '').toLowerCase().includes(q));
+  }, [uniqueRfps, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(pageNum, totalPages);
