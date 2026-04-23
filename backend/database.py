@@ -37,6 +37,18 @@ def ensure_db_schema():
                     "WHERE source_workflow_id IS NOT NULL"
                 )
             )
+    if "rfp_workflow_requests" in tables:
+        workflow_columns = {column["name"] for column in inspector.get_columns("rfp_workflow_requests")}
+        with engine.begin() as connection:
+            if "active_dedupe_key" not in workflow_columns:
+                connection.execute(text("ALTER TABLE rfp_workflow_requests ADD COLUMN active_dedupe_key TEXT"))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_rfp_workflow_active_dedupe_key "
+                    "ON rfp_workflow_requests(active_dedupe_key) "
+                    "WHERE active_dedupe_key IS NOT NULL"
+                )
+            )
     _schema_verified = True
 
 def init_db():

@@ -41,6 +41,7 @@ class RfpWorkflowRequest(Base):
     requester_name = Column(String, nullable=False)
     requester_email = Column(String, nullable=False)
     title = Column(String, nullable=False, default="Stakeholder RFP Request")
+    active_dedupe_key = Column(String, nullable=True)
     initial_messages = Column(Text, nullable=False)
     initial_summary = Column(Text, nullable=True)
     workflow_status = Column(String, nullable=False, default="drafting")

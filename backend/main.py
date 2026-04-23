@@ -197,6 +197,14 @@ def now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds")
 
 
+def _normalize_workflow_title(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _make_active_workflow_key(requester_email: str, title: str) -> str:
+    return f"{str(requester_email or '').strip().lower()}::{_normalize_workflow_title(title)}"
+
+
 def get_db():
     ensure_db_schema()
     db = SessionLocal()
@@ -1391,6 +1399,52 @@ def _serialize_workflow(workflow: RfpWorkflowRequestModel) -> Dict[str, Any]:
     }
 
 
+def _find_active_workflow(
+    db: Session,
+    requester_email: str,
+    title: str,
+) -> Optional[RfpWorkflowRequestModel]:
+    clean_email = requester_email.strip()
+    dedupe_key = _make_active_workflow_key(clean_email, title)
+    workflow = (
+        db.query(RfpWorkflowRequestModel)
+        .options(joinedload(RfpWorkflowRequestModel.stakeholders))
+        .filter(RfpWorkflowRequestModel.active_dedupe_key == dedupe_key)
+        .order_by(RfpWorkflowRequestModel.id.desc())
+        .first()
+    )
+    if workflow:
+        return workflow
+
+    candidates = _list_active_workflows(db, clean_email, title)
+    return candidates[0] if candidates else None
+
+
+def _list_active_workflows(
+    db: Session,
+    requester_email: str,
+    title: str,
+) -> List[RfpWorkflowRequestModel]:
+    clean_email = requester_email.strip()
+    normalized_title = _normalize_workflow_title(title)
+    candidates = (
+        db.query(RfpWorkflowRequestModel)
+        .options(joinedload(RfpWorkflowRequestModel.stakeholders))
+        .filter(
+            RfpWorkflowRequestModel.requester_email == clean_email,
+            RfpWorkflowRequestModel.delivered_at.is_(None),
+            RfpWorkflowRequestModel.workflow_status != WORKFLOW_STATUS_DELIVERED,
+        )
+        .order_by(RfpWorkflowRequestModel.id.desc())
+        .all()
+    )
+    return [
+        candidate
+        for candidate in candidates
+        if _normalize_workflow_title(candidate.title) == normalized_title
+    ]
+
+
 def _serialize_procurement_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "requester_name": config["requester_name"],
@@ -1431,12 +1485,19 @@ def _create_workflow_record(
     normalized_messages: List[Dict[str, str]],
     stakeholders: List[Dict[str, str]],
 ) -> RfpWorkflowRequestModel:
+    clean_title = re.sub(r"\s+", " ", title.strip())
+    active_dedupe_key = _make_active_workflow_key(requester_email, clean_title)
+    existing = _find_active_workflow(db, requester_email, clean_title)
+    if existing:
+        return existing
+
     summary = _summarize_requester_brief(normalized_messages)
     timestamp = now_iso()
     workflow = RfpWorkflowRequestModel(
         requester_name=requester_name.strip(),
         requester_email=requester_email.strip(),
-        title=title.strip(),
+        title=clean_title,
+        active_dedupe_key=active_dedupe_key,
         initial_messages=json.dumps(normalized_messages, ensure_ascii=False),
         initial_summary=summary,
         workflow_status=WORKFLOW_STATUS_DRAFTING,
@@ -1444,7 +1505,14 @@ def _create_workflow_record(
         updated_at=timestamp,
     )
     db.add(workflow)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_active_workflow(db, requester_email, clean_title)
+        if existing:
+            return existing
+        raise
 
     for stakeholder in stakeholders:
         db.add(
@@ -1598,6 +1666,18 @@ def _deliver_final_rfp_if_needed(db: Session, workflow: RfpWorkflowRequestModel)
     if workflow.workflow_status == WORKFLOW_STATUS_DELIVERED or workflow.delivered_at:
         return
 
+    competing_workflows = _list_active_workflows(db, workflow.requester_email, workflow.title)
+    if competing_workflows and competing_workflows[0].id != workflow.id:
+        workflow.workflow_status = WORKFLOW_STATUS_DELIVERED
+        workflow.active_dedupe_key = None
+        workflow.delivered_at = now_iso()
+        workflow.updated_at = now_iso()
+        workflow.last_error = (
+            f"Suppressed duplicate workflow delivery in favor of workflow #{competing_workflows[0].id}."
+        )
+        db.commit()
+        return
+
     claimed_at = now_iso()
     claimed = (
         db.query(RfpWorkflowRequestModel)
@@ -1643,9 +1723,26 @@ def _deliver_final_rfp_if_needed(db: Session, workflow: RfpWorkflowRequestModel)
         raise
 
     delivery_workflow.workflow_status = WORKFLOW_STATUS_DELIVERED
+    delivery_workflow.active_dedupe_key = None
     delivery_workflow.delivered_at = now_iso()
     delivery_workflow.updated_at = now_iso()
     delivery_workflow.last_error = None
+
+    duplicate_workflows = _list_active_workflows(
+        db,
+        delivery_workflow.requester_email,
+        delivery_workflow.title,
+    )
+    for duplicate in duplicate_workflows:
+        if duplicate.id == delivery_workflow.id:
+            continue
+        duplicate.workflow_status = WORKFLOW_STATUS_DELIVERED
+        duplicate.active_dedupe_key = None
+        duplicate.delivered_at = delivery_workflow.delivered_at
+        duplicate.updated_at = delivery_workflow.updated_at
+        duplicate.last_error = (
+            f"Suppressed duplicate workflow delivery in favor of workflow #{delivery_workflow.id}."
+        )
     db.commit()
 
 
@@ -1930,16 +2027,7 @@ def chat_rfp(req: ChatRequest):
             db = SessionLocal()
             try:
                 normalized_messages = _normalize_messages(req.messages)
-                existing = (
-                    db.query(RfpWorkflowRequestModel)
-                    .options(joinedload(RfpWorkflowRequestModel.stakeholders))
-                    .filter(
-                        RfpWorkflowRequestModel.initial_messages == json.dumps(normalized_messages, ensure_ascii=False),
-                        RfpWorkflowRequestModel.requester_email == requester_email,
-                    )
-                    .order_by(RfpWorkflowRequestModel.id.desc())
-                    .first()
-                )
+                existing = _find_active_workflow(db, requester_email, title)
                 if existing:
                     logger.info("chat_rfp existing workflow reused workflow_id=%s", existing.id)
                     return {
