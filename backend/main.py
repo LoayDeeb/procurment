@@ -576,6 +576,24 @@ def _generate_rfp_pdf_file(text: str) -> str:
     return filename
 
 
+def _evaluation_pdf_template_context() -> Dict[str, str]:
+    return {
+        "document_lang": "en",
+        "document_dir": "ltr",
+        "document_title": "Proposal Evaluation Report",
+        "document_font_family": "'Georama', Arial, sans-serif",
+        "header_title": "Proposal Evaluation Report",
+        "header_subtitle": "Saudi Standards, Metrology and Quality Organization (SASO)",
+        "header_align": "left",
+        "paragraph_align": "left",
+        "table_text_align": "left",
+        "callout_border_side": "left",
+        "content_direction": "ltr",
+        "footer_note": "Generated for SASO internal procurement workflow.",
+        "header_alt": "SASO",
+    }
+
+
 def _generate_evaluation_pdf_file(markdown_text: str, proposal_id: int) -> str:
     filename = f"proposal_{proposal_id}_evaluation.pdf"
     filepath = PDF_DIR / filename
@@ -583,7 +601,12 @@ def _generate_evaluation_pdf_file(markdown_text: str, proposal_id: int) -> str:
     try:
         from render_pdf import generate_pdf
 
-        generate_pdf(markdown_text, str(template_path), str(filepath))
+        generate_pdf(
+            markdown_text,
+            str(template_path),
+            str(filepath),
+            template_context=_evaluation_pdf_template_context(),
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to generate evaluation PDF: {exc}") from exc
     return filename
@@ -599,7 +622,10 @@ def _render_evaluation_pdf_html(html_body: str, proposal_id: int) -> str:
 
         with template_path.open("r", encoding="utf-8") as handle:
             tpl = Template(handle.read())
-        html_out = tpl.render(content=html_body)
+        html_out = tpl.render(
+            content=f'<div style="direction:ltr;text-align:left;">{html_body}</div>',
+            **_evaluation_pdf_template_context(),
+        )
         HTML(string=html_out, base_url=str(BASE_DIR)).write_pdf(str(filepath))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to render evaluation PDF: {exc}") from exc
@@ -709,6 +735,7 @@ def _build_evaluation_html_body(
 """
 
     return f"""
+<div style="direction:ltr;text-align:left;">
 <section style="border:1px solid #dbe4f6;border-radius:12px;padding:14px 16px;background:#f8fbff;margin-bottom:12px;">
   <h2 style="margin:0 0 8px 0;color:#1f3280;">Proposal Evaluation Report</h2>
   <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -745,6 +772,7 @@ def _build_evaluation_html_body(
 {_render_list("Strengths", strengths, "No strengths were captured in the stored evaluation payload.")}
 {_render_list("Key Risks", risks, "No key risks were captured in the stored evaluation payload.")}
 {_render_list("Missing Requirements", missing_requirements, "No missing requirements were captured in the stored evaluation payload.")}
+</div>
 """
 
 
@@ -754,8 +782,9 @@ def _ensure_proposal_evaluation_pdf(
     rfp_name: str,
     overall_score: Optional[float] = None,
     scores: Optional[Dict[str, float]] = None,
+    force_refresh: bool = False,
 ) -> str:
-    if proposal.pdf_summary:
+    if proposal.pdf_summary and not force_refresh:
         existing_path = PDF_DIR / proposal.pdf_summary
         if existing_path.exists():
             return proposal.pdf_summary
@@ -2190,6 +2219,7 @@ def download_proposal_evaluation_pdf(proposal_id: int, db: Session = Depends(get
         db=db,
         proposal=proposal_record,
         rfp_name=rfp.name or f"RFP {proposal_record.rfp_id}",
+        force_refresh=True,
     )
     filepath = PDF_DIR / filename
     if not filepath.exists():

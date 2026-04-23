@@ -166,7 +166,7 @@ def _generate_pdf_with_fpdf(md_text: str, template_path: str, output_path: str):
     print(f"PDF generated with fallback engine: {output_path}")
 
 
-def generate_pdf(md_text: str, template_path: str, output_path: str):
+def generate_pdf(md_text: str, template_path: str, output_path: str, template_context=None):
     html_body = _markdown_to_html(md_text)
 
     html_out = None
@@ -175,7 +175,7 @@ def generate_pdf(md_text: str, template_path: str, output_path: str):
 
         with open(template_path, "r", encoding="utf-8") as f:
             tpl = Template(f.read())
-        html_out = tpl.render(content=html_body)
+        html_out = tpl.render(content=html_body, **(template_context or {}))
     except Exception:
         html_out = None
 

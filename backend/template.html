@@ -1,8 +1,21 @@
+{% set doc_lang = document_lang if document_lang is defined else 'ar' %}
+{% set doc_dir = document_dir if document_dir is defined else 'rtl' %}
+{% set doc_title = document_title if document_title is defined else 'Request for Proposal (RFP)' %}
+{% set doc_font_family = document_font_family if document_font_family is defined else "'Almarai', 'Georama', Arial, sans-serif" %}
+{% set header_title_text = header_title if header_title is defined else 'طلب تقديم عروض (RFP)' %}
+{% set header_subtitle_text = header_subtitle if header_subtitle is defined else 'Saudi Standards, Metrology and Quality Organization (SASO)' %}
+{% set header_align_value = header_align if header_align is defined else 'right' %}
+{% set paragraph_align_value = paragraph_align if paragraph_align is defined else 'justify' %}
+{% set table_align_value = table_text_align if table_text_align is defined else 'right' %}
+{% set callout_border_side_value = callout_border_side if callout_border_side is defined else 'right' %}
+{% set content_dir = content_direction if content_direction is defined else doc_dir %}
+{% set footer_note_text = footer_note if footer_note is defined else 'Generated for SASO internal procurement workflow.' %}
+{% set header_alt_text = header_alt if header_alt is defined else 'SASO' %}
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="{{ doc_lang }}" dir="{{ doc_dir }}">
 <head>
   <meta charset="utf-8">
-  <title>Request for Proposal (RFP)</title>
+  <title>{{ doc_title }}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Almarai:wght@400;700&family=Georama:wght@400;600;700&display=swap');
     :root {
@@ -16,13 +29,13 @@
     }
     * { box-sizing: border-box; }
     body {
-      font-family: 'Almarai', 'Georama', Arial, sans-serif;
+      font-family: {{ doc_font_family | safe }};
       font-size: 11.5pt;
       line-height: 1.65;
       color: var(--gig-dark);
       margin: 1.8cm;
       background: var(--gig-white);
-      direction: rtl;
+      direction: {{ doc_dir }};
     }
     .header {
       border-bottom: 3px solid var(--gig-blue);
@@ -40,7 +53,7 @@
       height: auto;
     }
     .header-title {
-      text-align: right;
+      text-align: {{ header_align_value }};
     }
     .header-title h1 {
       margin: 0;
@@ -69,7 +82,7 @@
     }
     p {
       margin: 0 0 0.8em;
-      text-align: justify;
+      text-align: {{ paragraph_align_value }};
     }
     ul, ol {
       margin: 0.6em 0 0.8em 1.2em;
@@ -84,7 +97,7 @@
     th, td {
       border: 1px solid var(--gig-border);
       padding: 8px 10px;
-      text-align: right;
+      text-align: {{ table_align_value }};
     }
     th {
       background: var(--gig-gray-5);
@@ -93,10 +106,13 @@
     }
     .callout {
       background: var(--gig-gray-5);
-      border-right: 4px solid var(--gig-gold);
+      border-{{ callout_border_side_value }}: 4px solid var(--gig-gold);
       padding: 10px 12px;
       margin: 0.9em 0;
       border-radius: 6px;
+    }
+    .document-content {
+      direction: {{ content_dir }};
     }
     .footer-note {
       margin-top: 20px;
@@ -118,18 +134,20 @@
 <body>
   <header class="header">
     <div class="header-inner">
-      <img src="saso_logo_large.png" alt="SASO" class="logo" />
+      <img src="saso_logo_large.png" alt="{{ header_alt_text }}" class="logo" />
       <div class="header-title">
-        <h1>طلب تقديم عروض (RFP)</h1>
-        <p>Saudi Standards, Metrology and Quality Organization (SASO)</p>
+        <h1>{{ header_title_text }}</h1>
+        <p>{{ header_subtitle_text }}</p>
       </div>
     </div>
   </header>
 
-  {{ content|safe }}
+  <main class="document-content">
+    {{ content|safe }}
+  </main>
 
   <div class="footer-note">
-    Generated for SASO internal procurement workflow.
+    {{ footer_note_text }}
   </div>
 </body>
 </html>
