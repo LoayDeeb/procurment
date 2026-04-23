@@ -832,10 +832,10 @@ def generate_rfp_pdf(text: str) -> str:
         db.close()
 
 
-def _render_html_list(items: List[str], ordered: bool = False) -> str:
+def _render_html_list(items: List[str], ordered: bool = False, escape_items: bool = True) -> str:
     tag = "ol" if ordered else "ul"
     item_html = "".join(
-        f'<li style="margin: 0 0 8px 0;">{escape(item)}</li>'
+        f'<li style="margin: 0 0 8px 0;">{escape(item) if escape_items else item}</li>'
         for item in items
         if str(item).strip()
     )
@@ -848,6 +848,12 @@ def _render_html_list(items: List[str], ordered: bool = False) -> str:
 
 
 def _text_to_email_html(text: str) -> str:
+    def _format_inline_markup(value: str) -> str:
+        escaped = escape(value)
+        escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+        escaped = re.sub(r"\*(.+?)\*", r"<em>\1</em>", escaped)
+        return escaped
+
     cleaned = (text or "").replace("\r\n", "\n").strip()
     if not cleaned:
         return (
@@ -866,15 +872,19 @@ def _text_to_email_html(text: str) -> str:
 
         if all(re.match("^(?:[-*]|\\u2022)\\s+", line) for line in lines):
             items = [re.sub("^(?:[-*]|\\u2022)\\s+", "", line).strip() for line in lines]
-            html_blocks.append(_render_html_list(items))
+            html_blocks.append(
+                _render_html_list([_format_inline_markup(item) for item in items], escape_items=False)
+            )
             continue
 
         if all(re.match(r"^\d+[.)]\s+", line) for line in lines):
             items = [re.sub(r"^\d+[.)]\s+", "", line).strip() for line in lines]
-            html_blocks.append(_render_html_list(items, ordered=True))
+            html_blocks.append(
+                _render_html_list([_format_inline_markup(item) for item in items], ordered=True, escape_items=False)
+            )
             continue
 
-        paragraph = "<br />".join(escape(line) for line in lines)
+        paragraph = "<br />".join(_format_inline_markup(line) for line in lines)
         html_blocks.append(
             '<p style="margin: 0 0 14px 0; color: #33426f; font-size: 14px; line-height: 22px;">'
             f"{paragraph}"
